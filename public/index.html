@@ -135,13 +135,30 @@
             <option value="future">Previstas futuras</option>
           </select>
           <select id="transactionSort">
-            <option value="desc">Mais recentes</option>
-            <option value="asc">Mais antigos</option>
+            <option value="date:desc">Data decrescente</option>
+            <option value="date:asc">Data crescente</option>
+            <option value="description:asc">Descricao A-Z</option>
+            <option value="description:desc">Descricao Z-A</option>
+            <option value="category:asc">Categoria A-Z</option>
+            <option value="category:desc">Categoria Z-A</option>
+            <option value="amount:asc">Valor crescente</option>
+            <option value="amount:desc">Valor decrescente</option>
+            <option value="method:asc">Meio A-Z</option>
+            <option value="method:desc">Meio Z-A</option>
           </select>
         </section>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Data</th><th>Descricao</th><th>Categoria</th><th>Valor</th><th>Meio</th><th></th></tr></thead>
+            <thead>
+              <tr>
+                <th><button type="button" class="sort-header" data-tx-sort="date">Data <span data-sort-indicator="date"></span></button></th>
+                <th><button type="button" class="sort-header" data-tx-sort="description">Descricao <span data-sort-indicator="description"></span></button></th>
+                <th><button type="button" class="sort-header" data-tx-sort="category">Categoria <span data-sort-indicator="category"></span></button></th>
+                <th><button type="button" class="sort-header" data-tx-sort="amount">Valor <span data-sort-indicator="amount"></span></button></th>
+                <th><button type="button" class="sort-header" data-tx-sort="method">Meio <span data-sort-indicator="method"></span></button></th>
+                <th></th>
+              </tr>
+            </thead>
             <tbody id="transactionsTable"></tbody>
           </table>
         </div>

@@ -384,6 +384,29 @@ th {
   text-transform: uppercase;
   background: var(--surface-soft);
 }
+.sort-header {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0;
+  font: inherit;
+  text-transform: inherit;
+}
+.sort-header:hover,
+.sort-header.active {
+  color: var(--text);
+}
+.sort-header span {
+  min-width: 32px;
+  font-size: 10px;
+  line-height: 1;
+}
 td small {
   display: block;
   color: var(--muted);

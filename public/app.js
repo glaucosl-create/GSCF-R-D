@@ -22,6 +22,8 @@ let selectedDashboardMonth = currentMonth();
 let selectedTransactionMonth = 'all';
 let selectedTransactionCategory = 'all';
 let transactionPage = 1;
+let transactionSortField = 'date';
+let transactionSortDirection = 'desc';
 const TRANSACTION_PAGE_SIZE = 15;
 const THEME_KEY = 'cfdr-theme';
 const APP_SESSION_KEY = 'cfdr-active-session';
@@ -288,11 +290,11 @@ function renderMonthBars(rows) {
 
 function renderTransactions() {
   renderTransactionFilters();
+  updateTransactionSortHeaders();
   const typeFilter = $('transactionTypeFilter').value;
   const monthFilter = $('transactionMonthFilter').value;
   const categoryFilter = $('transactionCategoryFilter').value;
   const projectionFilter = $('transactionProjectionFilter').value;
-  const sort = $('transactionSort').value;
   const filteredRows = state.transactions
     .filter(tx => typeFilter === 'all' || tx.type === typeFilter)
     .filter(tx => monthFilter === 'all' || tx.date.slice(0, 7) === monthFilter)
@@ -302,10 +304,7 @@ function renderTransactions() {
       if (projectionFilter === 'future') return isPlannedInstallment(tx) && tx.date >= today();
       return true;
     })
-    .sort((a, b) => {
-      const direction = sort === 'asc' ? 1 : -1;
-      return direction * (a.date.localeCompare(b.date) || a.id - b.id);
-    });
+    .sort(compareTransactions);
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / TRANSACTION_PAGE_SIZE));
   transactionPage = Math.min(Math.max(1, transactionPage), totalPages);
   const start = (transactionPage - 1) * TRANSACTION_PAGE_SIZE;
@@ -325,6 +324,50 @@ function renderTransactions() {
     </tr>
   `).join('') : '<tr><td colspan="6">Nenhum lancamento encontrado para os filtros selecionados.</td></tr>';
   renderTransactionPagination(filteredRows.length, start, rows.length, totalPages);
+}
+
+function transactionSortValue(tx, field) {
+  if (field === 'description') return String(tx.description || '').toLocaleLowerCase('pt-BR');
+  if (field === 'category') return String(tx.category || '').toLocaleLowerCase('pt-BR');
+  if (field === 'amount') return Number(tx.amount || 0);
+  if (field === 'method') return `${labelMethod(tx.payment_method)} ${tx.card_name || ''}`.toLocaleLowerCase('pt-BR');
+  return String(tx.date || '');
+}
+
+function compareTransactions(a, b) {
+  const direction = transactionSortDirection === 'asc' ? 1 : -1;
+  const valueA = transactionSortValue(a, transactionSortField);
+  const valueB = transactionSortValue(b, transactionSortField);
+  let result = 0;
+  if (typeof valueA === 'number' || typeof valueB === 'number') result = Number(valueA || 0) - Number(valueB || 0);
+  else result = String(valueA).localeCompare(String(valueB), 'pt-BR', { numeric: true, sensitivity: 'base' });
+  if (!result) result = a.date.localeCompare(b.date) || Number(a.id || 0) - Number(b.id || 0);
+  return direction * result;
+}
+
+function updateTransactionSortHeaders() {
+  const sortValue = `${transactionSortField}:${transactionSortDirection}`;
+  if ($('transactionSort')?.value !== sortValue) $('transactionSort').value = sortValue;
+  document.querySelectorAll('[data-tx-sort]').forEach(button => {
+    const active = button.dataset.txSort === transactionSortField;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-sort', active ? (transactionSortDirection === 'asc' ? 'ascending' : 'descending') : 'none');
+  });
+  document.querySelectorAll('[data-sort-indicator]').forEach(indicator => {
+    indicator.textContent = indicator.dataset.sortIndicator === transactionSortField
+      ? (transactionSortDirection === 'asc' ? 'ASC' : 'DESC')
+      : '';
+  });
+}
+
+function setTransactionSort(field, direction = null) {
+  if (transactionSortField === field) transactionSortDirection = direction || (transactionSortDirection === 'asc' ? 'desc' : 'asc');
+  else {
+    transactionSortField = field;
+    transactionSortDirection = direction || (field === 'date' ? 'desc' : 'asc');
+  }
+  transactionPage = 1;
+  renderTransactions();
 }
 
 function renderTransactionFilters() {
@@ -691,8 +734,11 @@ $('transactionProjectionFilter').addEventListener('change', () => {
   renderTransactions();
 });
 $('transactionSort').addEventListener('change', () => {
-  transactionPage = 1;
-  renderTransactions();
+  const [field, direction] = $('transactionSort').value.split(':');
+  setTransactionSort(field || 'date', direction === 'asc' ? 'asc' : 'desc');
+});
+document.querySelectorAll('[data-tx-sort]').forEach(button => {
+  button.addEventListener('click', () => setTransactionSort(button.dataset.txSort));
 });
 $('transactionPrevPage').addEventListener('click', () => {
   transactionPage = Math.max(1, transactionPage - 1);
