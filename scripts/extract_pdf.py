@@ -12,7 +12,29 @@ DATE_WORD_RE = re.compile(r"^\d{1,2}\s*[/.-]\s*\d{1,2}$")
 
 
 def extract_text(page):
-    return page.extract_text(x_tolerance=1, y_tolerance=3) or ""
+    words = page.extract_words(x_tolerance=1, y_tolerance=3) or []
+    if not words:
+        return page.extract_text(x_tolerance=1, y_tolerance=3) or ""
+
+    lines = []
+    current = []
+    current_top = None
+    for word in sorted(words, key=lambda item: (item["top"], item["x0"])):
+        top = word["top"]
+        if current_top is None or abs(top - current_top) <= 3:
+            current.append(word)
+            current_top = top if current_top is None else current_top
+            continue
+        lines.append(current)
+        current = [word]
+        current_top = top
+    if current:
+        lines.append(current)
+
+    return "\n".join(
+        " ".join(word["text"] for word in sorted(line, key=lambda item: item["x0"]))
+        for line in lines
+    )
 
 
 def likely_interleaved_columns(text):
