@@ -107,6 +107,7 @@ async function boot() {
   applyTheme(localStorage.getItem(THEME_KEY) || 'light');
   $('txDate').value = today();
   $('invoiceMonth').value = currentMonth();
+  updateTransactionInstallmentHint();
   if (!sessionStorage.getItem(APP_SESSION_KEY)) {
     await fetch('/api/auth/logout', { method: 'POST', cache: 'no-store', keepalive: true }).catch(() => {});
     showAuth();
@@ -202,6 +203,12 @@ function renderCategories(selectedValue = $('txCategory')?.value || '') {
     ? options.map(name => `<option value="${escapeAttr(name)}">${escapeHtml(name)}</option>`).join('')
     : '<option value="">Cadastre uma categoria</option>';
   if (current && options.includes(current)) $('txCategory').value = current;
+}
+
+function updateTransactionInstallmentHint() {
+  const installments = Number($('txInstallments')?.value || 1);
+  $('txAmount').placeholder = installments > 1 ? 'Valor da parcela' : 'Valor';
+  $('txAmount').title = installments > 1 ? 'Informe o valor de cada parcela mensal.' : '';
 }
 
 function expenseCategoryOptions(selected) {
@@ -364,7 +371,7 @@ function transactionCategoryKey(tx) {
 }
 
 function isPlannedInstallment(tx) {
-  return tx.type === 'expense' && tx.payment_method === 'credit_card' && Number(tx.installment_total || 1) > 1;
+  return Number(tx.installment_total || 1) > 1;
 }
 
 function renderCards() {
@@ -496,6 +503,7 @@ function clearTxForm() {
   $('transactionForm').reset();
   $('txDate').value = today();
   $('txInstallments').value = 1;
+  updateTransactionInstallmentHint();
   $('transactionEditStatus').classList.add('hidden');
   $('saveTxBtn').textContent = 'Salvar lancamento';
   $('clearTxBtn').textContent = 'Limpar';
@@ -537,6 +545,7 @@ document.addEventListener('click', async (event) => {
     $('txMethod').value = tx.payment_method;
     $('txCard').value = tx.card_id || '';
     $('txInstallments').value = tx.installment_total || 1;
+    updateTransactionInstallmentHint();
     $('txNotes').value = tx.notes || '';
     setTransactionEditing(tx);
   }
@@ -656,6 +665,8 @@ $('cancelTxEditBtn').addEventListener('click', clearTxForm);
 $('clearCardBtn').addEventListener('click', clearCardForm);
 $('clearCategoryBtn').addEventListener('click', clearCategoryForm);
 $('txType').addEventListener('change', renderCategories);
+$('txInstallments').addEventListener('input', updateTransactionInstallmentHint);
+$('txInstallments').addEventListener('change', updateTransactionInstallmentHint);
 $('transactionTypeFilter').addEventListener('change', () => {
   transactionPage = 1;
   selectedTransactionCategory = 'all';

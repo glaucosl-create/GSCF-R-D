@@ -261,14 +261,24 @@ async function createInvoiceRows(userId, input) {
 async function createTransactionRows(userId, input) {
   const tx = normalizeTransaction(input);
   const total = Math.max(1, Math.min(120, Number(input.installments || tx.installment_total || 1)));
-  const shouldSplit = tx.type === 'expense' && tx.payment_method === 'credit_card' && total > 1 && !input.id;
+  const current = Math.max(1, Math.min(total, Number(input.installment_index || tx.installment_index || 1)));
+  const shouldProject = total > current && !input.id;
   const rows = [];
-  if (shouldSplit) {
+  if (shouldProject) {
     const group = randomBytes(8).toString('hex');
-    const perInstallment = Math.round((tx.amount / total) * 100) / 100;
-    for (let i = 0; i < total; i++) rows.push({ ...tx, date: monthAdd(tx.date, i), amount: perInstallment, installment_group: group, installment_index: i + 1, installment_total: total });
+    for (let index = current; index <= total; index++) {
+      const projectedNotes = index === current ? tx.notes : [tx.notes, 'Parcela futura prevista a partir de lancamento manual.'].filter(Boolean).join(' ');
+      rows.push({
+        ...tx,
+        date: monthAdd(tx.date, index - current),
+        installment_group: group,
+        installment_index: index,
+        installment_total: total,
+        notes: projectedNotes
+      });
+    }
   } else {
-    rows.push(tx);
+    rows.push({ ...tx, installment_total: total, installment_index: current });
   }
   for (const row of rows) {
     await statements.insertTransaction.run(userId, row.type, row.date, row.description, row.category, row.amount, row.payment_method, row.card_id, row.invoice_id, row.installment_group, row.installment_index, row.installment_total, row.notes);
