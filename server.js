@@ -386,7 +386,7 @@ function monthFromToken(value) {
 function parseInvoiceText(text, fallbackMonth) {
   const rows = [];
   const fallbackRows = [];
-  const numericDateLineRegex = /^(\d{1,2})\s*[\/.-]?\s*(\d{1,2})(?:[\/.-](\d{2,4}))?\s+(.+?)\s+(R\$?\s*)?(-?\d{1,3}(?:\.\d{3})*,\d{2}-?|-?\d{2,}-?)\s*$/i;
+  const numericDateLineRegex = /^(\d{1,2})\s*[\/.-]\s*(\d{1,2})(?:[\/.-](\d{2,4}))?\s+(.+?)\s+(R\$?\s*)?(-?\d{1,3}(?:\.\d{3})*,\d{2}-?|-?\d{2,}-?)\s*$/i;
   const namedMonthLineRegex = /^(\d{1,2})\s+([a-zA-Z\u00C0-\u00FF]{3,9})\.?(?:\s+(\d{2,4}))?\s+(.+?)\s+(R\$?\s*)?(-?\d{1,3}(?:\.\d{3})*,\d{2}-?|-?\d{2,}-?)\s*$/i;
   const totalRegex = /(?:total\s+(?:da\s+)?fatura|valor\s+total).*?(\d{1,3}(?:\.\d{3})*,\d{2})/i;
   const ignoredSections = /parcele facil|pagamento minimo|encargos financeiros|boleto|recibo do pagador|resumo da fatura|limites em r\$|previsao para fechamento|saldos futuros/i;
@@ -398,11 +398,11 @@ function parseInvoiceText(text, fallbackMonth) {
       inTransactions = true;
       continue;
     }
-    if (inTransactions && /^total da fatura/i.test(line)) break;
     const totalMatch = line.match(totalRegex);
     if (totalMatch) total = parseMoneyBR(totalMatch[1]);
+    if (inTransactions && /^total da fatura/i.test(line)) break;
     if (ignoredSections.test(line) && !inTransactions) continue;
-    const match = line.match(numericDateLineRegex) || line.match(namedMonthLineRegex);
+    const match = line.match(namedMonthLineRegex) || line.match(numericDateLineRegex);
     if (!match) continue;
     const [, day, monthRaw, yearRaw, descriptionRaw, , amountRaw] = match;
     const dayNumber = Number(day);
