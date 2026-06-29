@@ -479,8 +479,12 @@ function normalizeInvoiceLine(rawLine) {
   return String(rawLine || '')
     .replace(/[\u2013\u2014]/g, '-')
     .replace(/\u00A0/g, ' ')
+    .replace(/(\d{1,3}\s*\/\s*)(\d{2})(\d{1,3},\d{2}\b)/g, '$1$2 $3')
     .replace(/\s+/g, ' ')
-    .trim();
+    .trim()
+    .replace(/^\d{1,2}\s*[^0-9A-Za-z\u00C0-\u00FF\/.-]{1,12}(?=\d{1,2}\s*(?:[\/.-]\s*\d{1,2}|\s+[A-Za-z\u00C0-\u00FF]{3,9}))/u, '')
+    .replace(/^\d{1,2}\s+(?=\d{1,2}\s*(?:[\/.-]\s*\d{1,2}|\s+[A-Za-z\u00C0-\u00FF]{3,9}))/u, '')
+    .replace(/^[^0-9A-Za-z\u00C0-\u00FF]{1,12}(?=\d{1,2}\s*(?:[\/.-]\s*\d{1,2}|\s+[A-Za-z\u00C0-\u00FF]{3,9}))/u, '');
 }
 
 function normalizeInvoiceSearch(value) {
@@ -493,8 +497,9 @@ function normalizeInvoiceSearch(value) {
 function isInvoiceTransactionHeader(line) {
   const text = normalizeInvoiceSearch(line);
   return (
-    (/^data\b/.test(text) && /(descricao|estabelecimento|historico|valor|parcela)/.test(text))
+    (/\bdata\b/.test(text) && /(descricao|estabelecimento|historico|valor|parcela)/.test(text))
     || /lancamentos.*(brasil|nacionais|valor|cartao)/.test(text)
+    || /lancamentos.*(compras|saques)/.test(text)
     || /compras.*(nacionais|cartao|valor)/.test(text)
     || /detalhamento.*(compra|transacao|lancamento)/.test(text)
   );
@@ -524,6 +529,26 @@ function extractInvoiceDatePrefix(line, fallbackMonth) {
   const year = yearRaw ? (yearRaw.length === 2 ? `20${yearRaw}` : yearRaw) : String(inferredYear);
   const date = `${year}-${String(monthNumber).padStart(2, '0')}-${String(dayNumber).padStart(2, '0')}`;
   return { date, rest: normalizeInvoiceLine(rest) };
+}
+
+function splitInterleavedInvoiceLine(line) {
+  const datePattern = /\d{1,2}\s*(?:[\/.-]\s*\d{1,2}|(?:\s+)[A-Za-z\u00C0-\u00FF]{3,9})(?:\s+\d{2,4})?/giu;
+  const moneyPattern = /(?:R\$\s*)?-?\d{1,3}(?:\.\d{3})*,\d{2}-?/i;
+  const matches = [...line.matchAll(datePattern)];
+  if (matches.length < 2) return [line];
+
+  const splitIndexes = [0];
+  for (let index = 1; index < matches.length; index += 1) {
+    const start = matches[index].index || 0;
+    const previousText = line.slice(splitIndexes[splitIndexes.length - 1], start);
+    if (moneyPattern.test(previousText)) splitIndexes.push(start);
+  }
+
+  if (splitIndexes.length === 1) return [line];
+  splitIndexes.push(line.length);
+  return splitIndexes.slice(0, -1)
+    .map((start, index) => normalizeInvoiceLine(line.slice(start, splitIndexes[index + 1])))
+    .filter(Boolean);
 }
 
 function extractLastInvoiceAmount(text) {
@@ -641,36 +666,40 @@ function parseInvoiceText(text, fallbackMonth) {
   };
 
   for (const rawLine of text.split(/\r?\n/)) {
-    const line = normalizeInvoiceLine(rawLine);
-    if (!line) continue;
+    const normalizedLine = normalizeInvoiceLine(rawLine);
+    if (!normalizedLine) continue;
 
-    if (isInvoiceTransactionHeader(line)) {
-      flushBlock();
-      inTransactions = true;
-      continue;
-    }
+    for (const line of splitInterleavedInvoiceLine(normalizedLine)) {
+      if (!line) continue;
 
-    const totalMatch = line.match(totalRegex);
-    if (totalMatch) total = parseMoneyBR(totalMatch[1]);
+      if (isInvoiceTransactionHeader(line)) {
+        flushBlock();
+        inTransactions = true;
+        continue;
+      }
 
-    if (isInvoiceStopLine(line)) {
-      flushBlock();
-      if (inTransactions && /^total/i.test(normalizeInvoiceSearch(line))) break;
-      continue;
-    }
-    if (ignoredSections.test(line) && !inTransactions) {
-      flushBlock();
-      continue;
-    }
+      const totalMatch = line.match(totalRegex);
+      if (totalMatch) total = parseMoneyBR(totalMatch[1]);
 
-    if (extractInvoiceDatePrefix(line, fallbackMonth)) {
-      flushBlock();
-      currentBlock = { text: line, inTransactions };
-      continue;
-    }
+      if (isInvoiceStopLine(line)) {
+        flushBlock();
+        if (inTransactions && /^total/i.test(normalizeInvoiceSearch(line))) break;
+        continue;
+      }
+      if (ignoredSections.test(line) && !inTransactions) {
+        flushBlock();
+        continue;
+      }
 
-    if (currentBlock) {
-      currentBlock.text = `${currentBlock.text} ${line}`;
+      if (extractInvoiceDatePrefix(line, fallbackMonth)) {
+        flushBlock();
+        currentBlock = { text: line, inTransactions };
+        continue;
+      }
+
+      if (currentBlock) {
+        currentBlock.text = `${currentBlock.text} ${line}`;
+      }
     }
   }
 
