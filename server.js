@@ -479,6 +479,7 @@ function normalizeInvoiceLine(rawLine) {
   return String(rawLine || '')
     .replace(/[\u2013\u2014]/g, '-')
     .replace(/\u00A0/g, ' ')
+    .replace(/(\d{1,3}\s*\/\s*)(\d{2})(\d{1,3},\d{2}\b)/g, '$1$2 $3')
     .replace(/\s+/g, ' ')
     .trim();
 }

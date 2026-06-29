@@ -8,6 +8,7 @@ texts = []
 DATE_RE = re.compile(r"\b\d{1,2}\s*(?:[/.-]\s*\d{1,2}|\s+[A-Za-zÀ-ÿ]{3,9})\b")
 MONEY_RE = re.compile(r"(?:R\$\s*)?-?\d{1,3}(?:\.\d{3})*,\d{2}-?")
 TOTAL_LINE_RE = re.compile(r"^\s*(?:total|subtotal)\b", re.IGNORECASE)
+DATE_WORD_RE = re.compile(r"^\d{1,2}\s*[/.-]\s*\d{1,2}$")
 
 
 def extract_text(page):
@@ -21,8 +22,28 @@ def likely_interleaved_columns(text):
     return False
 
 
+def detect_column_split(page):
+    words = page.extract_words(x_tolerance=1, y_tolerance=3) or []
+    date_xs = sorted(
+        word["x0"]
+        for word in words
+        if DATE_WORD_RE.match(word.get("text", "").strip())
+    )
+    if date_xs:
+        left_date_x = date_xs[0]
+        right_dates = [
+            x for x in date_xs
+            if x > left_date_x + (page.width * 0.25) and x > page.width * 0.45
+        ]
+        if right_dates:
+            split = min(right_dates) - 4
+            if page.width * 0.45 <= split <= page.width * 0.75:
+                return split
+    return page.width * 0.58
+
+
 def extract_columns(page):
-    split = page.width / 2
+    split = detect_column_split(page)
     left = page.crop((0, 0, split, page.height))
     right = page.crop((split, 0, page.width, page.height))
     column_texts = [extract_text(left), extract_text(right)]

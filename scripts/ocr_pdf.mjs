@@ -69,9 +69,9 @@ try {
     if (likelyInterleavedColumns(text)) {
       try {
         const { width, height } = pngSize(imagePath);
-        const half = Math.floor(width / 2);
-        const leftText = await recognizeText(imagePath, { rectangle: { left: 0, top: 0, width: half, height } });
-        const rightText = await recognizeText(imagePath, { rectangle: { left: half, top: 0, width: width - half, height } });
+        const split = Math.floor(width * 0.58);
+        const leftText = await recognizeText(imagePath, { rectangle: { left: 0, top: 0, width: split, height } });
+        const rightText = await recognizeText(imagePath, { rectangle: { left: split, top: 0, width: width - split, height } });
         const splitText = columnsText(leftText, rightText);
         if (splitText.trim()) text = splitText;
       } catch {
