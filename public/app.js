@@ -94,6 +94,39 @@ function setInvoiceProcessing(active, message = 'Enviando o PDF para leitura loc
   }, 1000);
 }
 
+function setInvoiceImportProcessing(active) {
+  const panel = $('invoiceProgress');
+  const button = $('importInvoiceBtn');
+  const review = $('invoiceReview');
+  panel.classList.toggle('hidden', !active);
+  button.disabled = active;
+  review.classList.toggle('is-processing', active);
+  review.querySelectorAll('input, select, button, textarea').forEach(element => {
+    if (element !== button) element.disabled = active;
+  });
+
+  if (!active) {
+    clearInterval(invoiceProgressTimer);
+    invoiceProgressTimer = null;
+    button.textContent = 'Importar lancamentos';
+    $('invoiceProgressElapsed').textContent = '0s';
+    return;
+  }
+
+  const startedAt = Date.now();
+  button.textContent = 'Importando...';
+  $('invoiceProgressTitle').textContent = 'Importando lancamentos';
+  $('invoiceProgressText').textContent = 'Gravando lancamentos e atualizando parcelas previstas.';
+  $('invoiceProgressElapsed').textContent = '0s';
+  clearInterval(invoiceProgressTimer);
+  invoiceProgressTimer = setInterval(() => {
+    const seconds = Math.floor((Date.now() - startedAt) / 1000);
+    $('invoiceProgressElapsed').textContent = `${seconds}s`;
+    if (seconds >= 5) $('invoiceProgressText').textContent = 'Conferindo parcelas futuras e evitando duplicidades.';
+    if (seconds >= 12) $('invoiceProgressText').textContent = 'Atualizando dashboard, categorias e previsoes mensais.';
+  }, 1000);
+}
+
 function showAuth() {
   $('authView').classList.remove('hidden');
   $('appView').classList.remove('hidden');
@@ -854,15 +887,20 @@ $('invoiceRows').addEventListener('change', updateInvoiceDraftField);
 
 $('importInvoiceBtn').addEventListener('click', async () => {
   if (!state.invoiceDraft) return;
-  await runAction(async () => {
-    const result = await api('/api/invoices/import', { method: 'POST', body: JSON.stringify(state.invoiceDraft) });
-    state.invoiceDraft = null;
-    renderInvoiceDraft();
-    await refreshAll();
-    const updated = Number(result.updated || 0);
-    const created = Number(result.created || 0);
-    toast(updated ? `${created} lancamentos criados e ${updated} previsoes confirmadas.` : 'Lancamentos importados.');
-  });
+  setInvoiceImportProcessing(true);
+  try {
+    await runAction(async () => {
+      const result = await api('/api/invoices/import', { method: 'POST', body: JSON.stringify(state.invoiceDraft) });
+      state.invoiceDraft = null;
+      renderInvoiceDraft();
+      await refreshAll();
+      const updated = Number(result.updated || 0);
+      const created = Number(result.created || 0);
+      toast(updated ? `${created} lancamentos criados e ${updated} previsoes confirmadas.` : 'Lancamentos importados.');
+    });
+  } finally {
+    setInvoiceImportProcessing(false);
+  }
 });
 
 boot().catch(error => toast(error.message));
