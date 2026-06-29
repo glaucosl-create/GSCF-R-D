@@ -1,0 +1,9 @@
+node_modules/
+data/
+tmp/
+.env
+.agents/
+.codex/
+*.sqlite
+*.db
+*.log

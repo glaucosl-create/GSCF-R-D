@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Controle Financeiro</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main id="authView" class="auth-shell hidden">
+    <section class="auth-panel">
+      <div>
+        <img class="auth-logo" src="/assets/cfdr-logo.jpeg" alt="CFDR">
+        <p class="eyebrow">Controle pessoal financeiro</p>
+        <h1>Financas, faturas e previsao em um unico lugar.</h1>
+        <p class="auth-copy">Acesso privado por email para organizar receitas, despesas, categorias, cartoes e previsoes.</p>
+      </div>
+      <form id="authForm" class="stack">
+        <input id="email" type="email" placeholder="email@dominio.com" autocomplete="email" required>
+        <input id="password" type="password" placeholder="Senha" autocomplete="current-password" minlength="6" required>
+        <button type="submit" id="loginBtn">Entrar</button>
+        <button type="button" id="registerBtn" class="secondary">Criar conta</button>
+        <div id="verificationNotice" class="verification-notice hidden"></div>
+      </form>
+    </section>
+  </main>
+
+  <main id="appView" class="app-shell hidden">
+    <aside class="sidebar">
+      <div>
+        <img class="brand-logo" src="/assets/cfdr-logo.jpeg" alt="CFDR">
+        <h1>Controle financeiro</h1>
+        <p id="userEmail"></p>
+      </div>
+      <nav>
+        <button class="nav active" data-view="dashboard">Dashboard</button>
+        <button class="nav" data-view="transactions">Lancamentos</button>
+        <button class="nav" data-view="categories">Categorias</button>
+        <button class="nav" data-view="cards">Cartoes</button>
+        <button class="nav" data-view="invoices">Faturas PDF</button>
+        <button class="nav" data-view="account">Conta</button>
+        <button class="nav admin-only hidden" data-view="admin">Admin</button>
+      </nav>
+      <button id="logoutBtn" class="secondary">Sair</button>
+    </aside>
+
+    <section class="content">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Visao atual</p>
+          <h2 id="viewTitle">Dashboard</h2>
+          <p id="lastRefreshText" class="last-refresh">Ainda nao atualizado nesta sessao</p>
+        </div>
+        <div class="topbar-actions">
+          <select id="themeSelect" class="theme-select" aria-label="Tema">
+            <option value="light">Tema claro</option>
+            <option value="dark">Tema escuro</option>
+          </select>
+          <button id="refreshBtn" class="icon-btn">Atualizar</button>
+        </div>
+      </header>
+
+      <section id="dashboard" class="view active">
+        <section class="dashboard-filter">
+          <div>
+            <h3>Periodo do dashboard</h3>
+            <p>Escolha o mes para ver receitas, despesas e categorias daquele periodo.</p>
+          </div>
+          <select id="dashboardMonth"></select>
+        </section>
+        <div class="metrics">
+          <article><span>Receitas do mes</span><strong id="incomeMetric">R$ 0,00</strong></article>
+          <article><span>Despesas do mes</span><strong id="expenseMetric">R$ 0,00</strong></article>
+          <article><span>Saldo do mes</span><strong id="balanceMetric">R$ 0,00</strong></article>
+        </div>
+        <div class="grid two">
+          <section>
+            <h3>Gastos por categoria</h3>
+            <div id="categoryBars" class="bars"></div>
+          </section>
+          <section>
+            <h3>Previsao de parcelas dos cartoes</h3>
+            <div id="forecastBars" class="bars"></div>
+          </section>
+        </div>
+        <section>
+          <h3>Receitas x despesas por mes</h3>
+          <div id="monthBars" class="bars wide"></div>
+        </section>
+      </section>
+
+      <section id="transactions" class="view">
+        <section id="transactionEditStatus" class="edit-status hidden">
+          <div>
+            <h3>Editando lancamento</h3>
+            <p id="transactionEditText">Revise os campos abaixo e salve as alteracoes.</p>
+          </div>
+          <button type="button" id="cancelTxEditBtn" class="secondary">Cancelar edicao</button>
+        </section>
+        <form id="transactionForm" class="form-grid">
+          <input type="hidden" id="transactionId">
+          <select id="txType"><option value="expense">Despesa</option><option value="income">Receita</option></select>
+          <input id="txDate" type="date" required>
+          <input id="txDescription" placeholder="Descricao" required>
+          <select id="txCategory" required></select>
+          <input id="txAmount" type="number" step="0.01" min="0" placeholder="Valor" required>
+          <select id="txMethod">
+            <option value="cash">Dinheiro/Pix</option>
+            <option value="bank">Conta bancaria</option>
+            <option value="debit_card">Debito</option>
+            <option value="credit_card">Cartao de credito</option>
+          </select>
+          <select id="txCard"></select>
+          <input id="txInstallments" type="number" min="1" max="120" value="1" title="Parcelas">
+          <input id="txNotes" placeholder="Observacoes">
+          <button type="submit" id="saveTxBtn">Salvar lancamento</button>
+          <button type="button" id="clearTxBtn" class="secondary">Limpar</button>
+        </form>
+        <section class="transactions-filter">
+          <div>
+            <h3>Filtros dos lancamentos</h3>
+            <p>Organize por receitas, despesas e pelo mes da parcela.</p>
+          </div>
+          <select id="transactionTypeFilter">
+            <option value="all">Todos</option>
+            <option value="expense">Despesas</option>
+            <option value="income">Receitas</option>
+          </select>
+          <select id="transactionMonthFilter"></select>
+          <select id="transactionSort">
+            <option value="desc">Mais recentes</option>
+            <option value="asc">Mais antigos</option>
+          </select>
+        </section>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Data</th><th>Descricao</th><th>Categoria</th><th>Valor</th><th>Meio</th><th></th></tr></thead>
+            <tbody id="transactionsTable"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="categories" class="view">
+        <form id="categoryForm" class="form-grid category-form">
+          <input type="hidden" id="categoryId">
+          <input id="categoryName" placeholder="Nome da categoria" required>
+          <select id="categoryType">
+            <option value="expense">Despesa</option>
+            <option value="income">Receita</option>
+          </select>
+          <button type="submit">Salvar categoria</button>
+          <button type="button" id="clearCategoryBtn" class="secondary">Limpar</button>
+        </form>
+        <div class="grid two">
+          <section>
+            <h3>Categorias de despesas</h3>
+            <div id="expenseCategoriesList" class="cards-list"></div>
+          </section>
+          <section>
+            <h3>Categorias de receitas</h3>
+            <div id="incomeCategoriesList" class="cards-list"></div>
+          </section>
+        </div>
+      </section>
+
+      <section id="cards" class="view">
+        <form id="cardForm" class="form-grid compact">
+          <input type="hidden" id="cardId">
+          <input id="cardName" placeholder="Nome do cartao" required>
+          <input id="cardBrand" placeholder="Bandeira">
+          <input id="cardLimit" type="number" step="0.01" min="0" placeholder="Limite">
+          <input id="cardClosing" type="number" min="1" max="31" placeholder="Fechamento">
+          <input id="cardDue" type="number" min="1" max="31" placeholder="Vencimento">
+          <label class="check"><input id="cardActive" type="checkbox" checked> Ativo</label>
+          <button type="submit">Salvar cartao</button>
+          <button type="button" id="clearCardBtn" class="secondary">Limpar</button>
+        </form>
+        <div id="cardsList" class="cards-list"></div>
+      </section>
+
+      <section id="invoices" class="view">
+        <form id="invoiceForm" class="form-grid compact" enctype="multipart/form-data">
+          <select id="invoiceCard" required></select>
+          <input id="invoiceMonth" type="month" required>
+          <input id="invoicePdf" type="file" accept="application/pdf" required>
+          <button type="submit" id="invoiceReadBtn">Ler PDF</button>
+        </form>
+        <section id="invoiceProgress" class="progress-panel hidden" aria-live="polite">
+          <div class="spinner"></div>
+          <div>
+            <h3 id="invoiceProgressTitle">Lendo fatura</h3>
+            <p id="invoiceProgressText">Enviando o PDF para leitura local.</p>
+            <small id="invoiceProgressElapsed">0s</small>
+          </div>
+        </section>
+        <section id="invoiceReview" class="hidden">
+          <div class="section-head">
+            <h3>Itens detectados</h3>
+            <button id="importInvoiceBtn">Importar lancamentos</button>
+          </div>
+          <div id="invoiceRows" class="review-list"></div>
+        </section>
+        <section>
+          <h3>Faturas importadas</h3>
+          <div id="invoiceList" class="cards-list"></div>
+        </section>
+      </section>
+
+      <section id="account" class="view">
+        <section>
+          <h3>Seguranca da conta</h3>
+          <form id="passwordForm" class="form-grid compact">
+            <input id="currentPassword" type="password" placeholder="Senha atual" autocomplete="current-password" required>
+            <input id="newPassword" type="password" placeholder="Nova senha" autocomplete="new-password" minlength="6" required>
+            <input id="confirmPassword" type="password" placeholder="Confirmar nova senha" autocomplete="new-password" minlength="6" required>
+            <button type="submit">Alterar senha</button>
+          </form>
+        </section>
+      </section>
+
+      <section id="admin" class="view">
+        <section class="section-head">
+          <div>
+            <h3>Usuarios e acessos</h3>
+            <p class="muted">Controle liberacao, bloqueio e validade de uso.</p>
+          </div>
+          <button type="button" id="refreshAdminBtn" class="secondary">Atualizar admin</button>
+        </section>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Email</th><th>Status</th><th>Validade</th><th>Perfil</th><th></th></tr></thead>
+            <tbody id="adminUsersTable"></tbody>
+          </table>
+        </div>
+        <section>
+          <h3>Vendas recebidas</h3>
+          <div id="salesList" class="cards-list"></div>
+        </section>
+      </section>
+    </section>
+  </main>
+
+  <div id="toast"></div>
+  <script src="/app.js" type="module"></script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+{
+  "name": "controle-financeiro-pessoal",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node --experimental-sqlite server.js",
+    "start:prod": "node server.js",
+    "migrate:postgres": "node --experimental-sqlite scripts/migrate_sqlite_to_postgres.mjs"
+  },
+  "dependencies": {
+    "nodemailer": "^9.0.1",
+    "pg": "^8.13.1",
+    "tesseract.js": "^7.0.0"
+  }
+}
