@@ -992,7 +992,13 @@ async function handleApi(req, res, url) {
     const text = await extractPdfText(filePath);
     const parsed = parseInvoiceText(text, month);
     const invoice = await statements.insertInvoice.run(user.id, cardId, month, file.filename, stored, parsed.total);
-    return sendJson(res, 201, { invoice_id: invoice.lastInsertRowid, total: parsed.total, rows: parsed.rows, extracted_chars: text.length });
+    return sendJson(res, 201, {
+      invoice_id: invoice.lastInsertRowid,
+      total: parsed.total,
+      rows: parsed.rows,
+      extracted_chars: text.length,
+      extracted_text: text.slice(0, 30000)
+    });
   }
   if (route(req.method, pathname, 'POST', '/api/invoices/import')) {
     const body = await readJson(req);

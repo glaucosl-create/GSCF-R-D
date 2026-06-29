@@ -489,6 +489,8 @@ function renderAdmin() {
 function renderInvoiceDraft() {
   const rows = state.invoiceDraft?.rows || [];
   $('invoiceReview').classList.toggle('hidden', !state.invoiceDraft);
+  $('invoiceExtractPanel').classList.toggle('hidden', !state.invoiceDraft?.extracted_text);
+  $('invoiceExtractText').value = state.invoiceDraft?.extracted_text || '';
   $('invoiceRows').innerHTML = rows.map((row, index) => `
     <div class="review-row invoice-review-row" data-row="${index}">
       <input type="date" value="${row.date}" data-invoice-field="date">
