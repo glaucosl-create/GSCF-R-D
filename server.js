@@ -356,10 +356,38 @@ function inferCategory(description) {
   return 'Cartao de credito';
 }
 
+function normalizeMonthToken(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z]/g, '')
+    .toLowerCase()
+    .slice(0, 3);
+}
+
+function monthFromToken(value) {
+  const months = {
+    jan: 1,
+    fev: 2,
+    mar: 3,
+    abr: 4,
+    mai: 5,
+    jun: 6,
+    jul: 7,
+    ago: 8,
+    set: 9,
+    out: 10,
+    nov: 11,
+    dez: 12
+  };
+  return months[normalizeMonthToken(value)] || 0;
+}
+
 function parseInvoiceText(text, fallbackMonth) {
   const rows = [];
   const fallbackRows = [];
-  const lineRegex = /^(\d{2})\s*[\/.-]?\s*(\d{2})(?:[\/.-](\d{2,4}))?\s+(.+?)\s+(R\$?\s*)?(-?\d{1,3}(?:\.\d{3})*,\d{2}-?|-?\d{2,}-?)\s*$/i;
+  const numericDateLineRegex = /^(\d{1,2})\s*[\/.-]?\s*(\d{1,2})(?:[\/.-](\d{2,4}))?\s+(.+?)\s+(R\$?\s*)?(-?\d{1,3}(?:\.\d{3})*,\d{2}-?|-?\d{2,}-?)\s*$/i;
+  const namedMonthLineRegex = /^(\d{1,2})\s+([a-zA-Z\u00C0-\u00FF]{3,9})\.?(?:\s+(\d{2,4}))?\s+(.+?)\s+(R\$?\s*)?(-?\d{1,3}(?:\.\d{3})*,\d{2}-?|-?\d{2,}-?)\s*$/i;
   const totalRegex = /(?:total\s+(?:da\s+)?fatura|valor\s+total).*?(\d{1,3}(?:\.\d{3})*,\d{2})/i;
   const ignoredSections = /parcele facil|pagamento minimo|encargos financeiros|boleto|recibo do pagador|resumo da fatura|limites em r\$|previsao para fechamento|saldos futuros/i;
   let total = 0;
@@ -374,17 +402,17 @@ function parseInvoiceText(text, fallbackMonth) {
     const totalMatch = line.match(totalRegex);
     if (totalMatch) total = parseMoneyBR(totalMatch[1]);
     if (ignoredSections.test(line) && !inTransactions) continue;
-    const match = line.match(lineRegex);
+    const match = line.match(numericDateLineRegex) || line.match(namedMonthLineRegex);
     if (!match) continue;
-    const [, day, month, yearRaw, descriptionRaw, , amountRaw] = match;
+    const [, day, monthRaw, yearRaw, descriptionRaw, , amountRaw] = match;
     const dayNumber = Number(day);
-    const monthNumber = Number(month);
+    const monthNumber = /^\d+$/.test(monthRaw) ? Number(monthRaw) : monthFromToken(monthRaw);
     if (dayNumber < 1 || dayNumber > 31 || monthNumber < 1 || monthNumber > 12) continue;
     const fallbackYear = Number(fallbackMonth.slice(0, 4));
     const fallbackMonthNumber = Number(fallbackMonth.slice(5, 7));
     const inferredYear = monthNumber > fallbackMonthNumber ? fallbackYear - 1 : fallbackYear;
     const year = yearRaw ? (yearRaw.length === 2 ? `20${yearRaw}` : yearRaw) : String(inferredYear);
-    const date = `${year}-${month}-${day}`;
+    const date = `${year}-${String(monthNumber).padStart(2, '0')}-${String(dayNumber).padStart(2, '0')}`;
     const installment = descriptionRaw.match(/(?:^|[\s-])(\d{1,2})\s*\/\s*(\d{1,2})(?=\D*$)/);
     const installment_index = installment ? Number(installment[1]) : 1;
     const installment_total = installment ? Number(installment[2]) : 1;
