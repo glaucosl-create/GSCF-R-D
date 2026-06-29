@@ -475,7 +475,218 @@ function monthFromToken(value) {
   return months[normalizeMonthToken(value)] || 0;
 }
 
+function normalizeInvoiceLine(rawLine) {
+  return String(rawLine || '')
+    .replace(/[\u2013\u2014]/g, '-')
+    .replace(/\u00A0/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function normalizeInvoiceSearch(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+
+function isInvoiceTransactionHeader(line) {
+  const text = normalizeInvoiceSearch(line);
+  return (
+    (/^data\b/.test(text) && /(descricao|estabelecimento|historico|valor|parcela)/.test(text))
+    || /lancamentos.*(brasil|nacionais|valor|cartao)/.test(text)
+    || /compras.*(nacionais|cartao|valor)/.test(text)
+    || /detalhamento.*(compra|transacao|lancamento)/.test(text)
+  );
+}
+
+function isInvoiceStopLine(line) {
+  const text = normalizeInvoiceSearch(line);
+  return /^(total|subtotal)\b/.test(text)
+    || /^(pagamento minimo|vencimento|codigo de barras|linha digitavel|boleto|pix copia)/.test(text)
+    || /^(encargos financeiros|limite disponivel|melhor dia de compra|resumo da fatura)/.test(text);
+}
+
+function extractInvoiceDatePrefix(line, fallbackMonth) {
+  const numeric = line.match(/^(\d{1,2})\s*[\/.-]\s*(\d{1,2})(?:\s*[\/.-]\s*(\d{2,4}))?\s*(.*)$/i);
+  const named = line.match(/^(\d{1,2})\s+([a-zA-Z\u00C0-\u00FF]{3,9})\.?(?:\s+(\d{2,4}))?\s*(.*)$/i);
+  const match = numeric || named;
+  if (!match) return null;
+
+  const [, day, monthRaw, yearRaw, rest = ''] = match;
+  const dayNumber = Number(day);
+  const monthNumber = /^\d+$/.test(monthRaw) ? Number(monthRaw) : monthFromToken(monthRaw);
+  if (dayNumber < 1 || dayNumber > 31 || monthNumber < 1 || monthNumber > 12) return null;
+
+  const fallbackYear = Number(fallbackMonth.slice(0, 4));
+  const fallbackMonthNumber = Number(fallbackMonth.slice(5, 7));
+  const inferredYear = monthNumber > fallbackMonthNumber ? fallbackYear - 1 : fallbackYear;
+  const year = yearRaw ? (yearRaw.length === 2 ? `20${yearRaw}` : yearRaw) : String(inferredYear);
+  const date = `${year}-${String(monthNumber).padStart(2, '0')}-${String(dayNumber).padStart(2, '0')}`;
+  return { date, rest: normalizeInvoiceLine(rest) };
+}
+
+function extractLastInvoiceAmount(text) {
+  const amountRegex = /(?:R\$\s*)?-?\d{1,3}(?:\.\d{3})*,\d{2}-?|(?:R\$\s*)?-?\d{3,}-?/gi;
+  const matches = [];
+  for (const match of text.matchAll(amountRegex)) {
+    const raw = match[0];
+    const index = match.index || 0;
+    const before = text[index - 1] || '';
+    const after = text[index + raw.length] || '';
+    if (before === '/' || after === '/') continue;
+
+    const tail = text.slice(index + raw.length).trim();
+    const hasMoneyShape = raw.includes(',') || /R\$/i.test(raw);
+    if (!hasMoneyShape && tail.length > 3) continue;
+    matches.push({ raw, index, end: index + raw.length });
+  }
+  return matches.length ? matches[matches.length - 1] : null;
+}
+
+function stripLeadingInvoiceDate(text) {
+  return normalizeInvoiceLine(text)
+    .replace(/^\d{1,2}\s*[\/.-]\s*\d{1,2}(?:\s*[\/.-]\s*\d{2,4})?\s+/, '')
+    .replace(/^\d{1,2}\s+[a-zA-Z\u00C0-\u00FF]{3,9}\.?(?:\s+\d{2,4})?\s+/, '')
+    .trim();
+}
+
+function validInstallment(index, total) {
+  return Number.isInteger(index)
+    && Number.isInteger(total)
+    && index >= 1
+    && total >= 1
+    && index <= total
+    && total <= 120;
+}
+
+function extractInstallmentInfo(description) {
+  const candidates = [
+    /\b(?:parc(?:ela)?|parcelamento|prest(?:acao)?|prest)\.?\s*(\d{1,3})\s*(?:\/|de)\s*(\d{1,3})\b/i,
+    /\b(\d{1,3})\s*(?:\/|de)\s*(\d{1,3})\s*(?:parc(?:ela)?s?|parcelas?|prest(?:acoes|acao)?|prest)\b/i,
+    /(?:^|[^\d])(\d{1,3})\s+de\s+(\d{1,3})(?=$|[^\d])/i,
+    /(?:^|[^\d/])(\d{1,3})\s*\/\s*(\d{1,3})(?=$|[^\d/])/i
+  ];
+
+  for (const pattern of candidates) {
+    const match = description.match(pattern);
+    if (!match) continue;
+    const installment_index = Number(match[1]);
+    const installment_total = Number(match[2]);
+    if (validInstallment(installment_index, installment_total)) {
+      return { installment_index, installment_total };
+    }
+  }
+  return { installment_index: 1, installment_total: 1 };
+}
+
+function cleanInvoiceDescription(description) {
+  return stripLeadingInvoiceDate(description)
+    .replace(/\b(?:parc(?:ela)?|parcelamento|prest(?:acao)?|prest)\.?\s*\d{1,3}\s*(?:\/|de)\s*\d{1,3}\b/gi, ' ')
+    .replace(/\b\d{1,3}\s*(?:\/|de)\s*\d{1,3}\s*(?:parc(?:ela)?s?|parcelas?|prest(?:acoes|acao)?|prest)\b/gi, ' ')
+    .replace(/(?:^|[^\d])\d{1,3}\s+de\s+\d{1,3}(?=$|[^\d])/gi, ' ')
+    .replace(/(?:^|[^\d/])\d{1,3}\s*\/\s*\d{1,3}(?=$|[^\d/])/g, ' ')
+    .replace(/^[-|:;,\s]+/, '')
+    .replace(/[-|:;,\s]+$/, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function parseInvoiceBlock(block, fallbackMonth) {
+  const prefix = extractInvoiceDatePrefix(block.text, fallbackMonth);
+  if (!prefix) return null;
+
+  const amountMatch = extractLastInvoiceAmount(prefix.rest);
+  if (!amountMatch) return null;
+
+  const beforeAmount = prefix.rest.slice(0, amountMatch.index).trim();
+  const afterAmount = prefix.rest.slice(amountMatch.end).replace(/^[DC]\b/i, '').trim();
+  const descriptionRaw = beforeAmount.length >= 3 || !/[a-zA-Z\u00C0-\u00FF]/.test(afterAmount)
+    ? beforeAmount
+    : afterAmount;
+  const installment = extractInstallmentInfo(descriptionRaw);
+  const description = cleanInvoiceDescription(descriptionRaw);
+  const isCreditOrPayment = /-$/.test(amountMatch.raw)
+    || /pagamento|credito recebido|cr[e\u00E9]dito|estorno|ajuste a credito/i.test(description);
+  const amount = Math.abs(parseMoneyBR(amountMatch.raw));
+  if (!description || !amount || isCreditOrPayment) return null;
+
+  return {
+    type: 'expense',
+    date: prefix.date,
+    description,
+    category: inferCategory(description),
+    amount,
+    payment_method: 'credit_card',
+    installment_index: installment.installment_index,
+    installment_total: installment.installment_total,
+    installments: 1,
+    confidence: block.inTransactions ? 0.84 : 0.64
+  };
+}
+
 function parseInvoiceText(text, fallbackMonth) {
+  const rows = [];
+  const fallbackRows = [];
+  const totalRegex = /(?:total\s+(?:da\s+)?fatura|valor\s+total).*?(\d{1,3}(?:\.\d{3})*,\d{2})/i;
+  const ignoredSections = /parcele facil|pagamento minimo|encargos financeiros|boleto|recibo do pagador|resumo da fatura|limites em r\$|previsao para fechamento|saldos futuros/i;
+  let total = 0;
+  let inTransactions = false;
+  let currentBlock = null;
+  const blocks = [];
+
+  const flushBlock = () => {
+    if (currentBlock) blocks.push(currentBlock);
+    currentBlock = null;
+  };
+
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = normalizeInvoiceLine(rawLine);
+    if (!line) continue;
+
+    if (isInvoiceTransactionHeader(line)) {
+      flushBlock();
+      inTransactions = true;
+      continue;
+    }
+
+    const totalMatch = line.match(totalRegex);
+    if (totalMatch) total = parseMoneyBR(totalMatch[1]);
+
+    if (isInvoiceStopLine(line)) {
+      flushBlock();
+      if (inTransactions && /^total/i.test(normalizeInvoiceSearch(line))) break;
+      continue;
+    }
+    if (ignoredSections.test(line) && !inTransactions) {
+      flushBlock();
+      continue;
+    }
+
+    if (extractInvoiceDatePrefix(line, fallbackMonth)) {
+      flushBlock();
+      currentBlock = { text: line, inTransactions };
+      continue;
+    }
+
+    if (currentBlock) {
+      currentBlock.text = `${currentBlock.text} ${line}`;
+    }
+  }
+
+  flushBlock();
+
+  for (const block of blocks) {
+    const parsedRow = parseInvoiceBlock(block, fallbackMonth);
+    if (!parsedRow) continue;
+    if (block.inTransactions) rows.push(parsedRow);
+    else fallbackRows.push(parsedRow);
+  }
+
+  return { total, rows: rows.length ? rows : fallbackRows };
+}
+
+function parseInvoiceTextLegacy(text, fallbackMonth) {
   const rows = [];
   const fallbackRows = [];
   const numericDateLineRegex = /^(\d{1,2})\s*[\/.-]\s*(\d{1,2})(?:[\/.-](\d{2,4}))?\s+(.+?)\s+(R\$?\s*)?(-?\d{1,3}(?:\.\d{3})*,\d{2}-?|-?\d{2,}-?)\s*$/i;
