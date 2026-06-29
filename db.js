@@ -341,21 +341,38 @@ export async function initDatabase({ dataDir }) {
     }),
     updateTransaction: prepare(`UPDATE transactions SET type=?, date=?, description=?, category=?, amount=?, payment_method=?, card_id=?, invoice_id=?, installment_group=?, installment_index=?, installment_total=?, notes=? WHERE id=? AND user_id=?`),
     deleteTransaction: prepare('DELETE FROM transactions WHERE id=? AND user_id=?'),
-    findProjectedInstallment: prepare(`
-      SELECT *
-      FROM transactions
-      WHERE user_id = ?
-        AND invoice_id IS NULL
-        AND payment_method = 'credit_card'
-        AND type = ?
-        AND (card_id = ? OR (card_id IS NULL AND ? IS NULL))
-        AND installment_index = ?
-        AND installment_total = ?
-        AND ABS(amount - ?) < 0.011
-        AND lower(trim(description)) = lower(trim(?))
-      ORDER BY id
-      LIMIT 1
-    `),
+    findProjectedInstallment: prepare({
+      sqlite: `
+        SELECT *
+        FROM transactions
+        WHERE user_id = ?
+          AND invoice_id IS NULL
+          AND payment_method = 'credit_card'
+          AND type = ?
+          AND (card_id = ? OR (card_id IS NULL AND ? IS NULL))
+          AND installment_index = ?
+          AND installment_total = ?
+          AND ABS(amount - ?) < 0.011
+          AND lower(trim(description)) = lower(trim(?))
+        ORDER BY id
+        LIMIT 1
+      `,
+      pg: `
+        SELECT *
+        FROM transactions
+        WHERE user_id = $1
+          AND invoice_id IS NULL
+          AND payment_method = 'credit_card'
+          AND type = $2
+          AND (card_id = $3 OR (card_id IS NULL AND $4::integer IS NULL))
+          AND installment_index = $5
+          AND installment_total = $6
+          AND ABS(amount - $7) < 0.011
+          AND lower(trim(description)) = lower(trim($8))
+        ORDER BY id
+        LIMIT 1
+      `
+    }),
     findProjectedInstallmentByGroup: prepare(`
       SELECT *
       FROM transactions
