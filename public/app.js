@@ -17,6 +17,7 @@ let invoiceProgressTimer = null;
 let selectedDashboardMonth = currentMonth();
 let selectedTransactionMonth = 'all';
 const THEME_KEY = 'cfdr-theme';
+const APP_SESSION_KEY = 'cfdr-active-session';
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -88,6 +89,7 @@ function showAuth() {
   $('authView').classList.remove('hidden');
   $('appView').classList.remove('hidden');
   $('appView').classList.add('locked');
+  document.querySelectorAll('.admin-only').forEach(element => element.classList.add('hidden'));
 }
 
 function showApp() {
@@ -102,13 +104,30 @@ async function boot() {
   applyTheme(localStorage.getItem(THEME_KEY) || 'light');
   $('txDate').value = today();
   $('invoiceMonth').value = currentMonth();
+  if (!sessionStorage.getItem(APP_SESSION_KEY)) {
+    await fetch('/api/auth/logout', { method: 'POST', cache: 'no-store', keepalive: true }).catch(() => {});
+    showAuth();
+    return;
+  }
   try {
     state.user = await api('/api/me');
+    sessionStorage.setItem(APP_SESSION_KEY, '1');
     showApp();
     await refreshAll();
   } catch {
+    sessionStorage.removeItem(APP_SESSION_KEY);
     showAuth();
   }
+}
+
+async function logout(message = 'Sessao encerrada.') {
+  await runAction(async () => {
+    await api('/api/auth/logout', { method: 'POST' });
+    sessionStorage.removeItem(APP_SESSION_KEY);
+    state.user = null;
+    showAuth();
+    toast(message);
+  });
 }
 
 async function refreshAll() {
@@ -547,6 +566,7 @@ $('authForm').addEventListener('submit', async (event) => {
   event.preventDefault();
   await runAction(async () => {
     state.user = await api('/api/auth/login', { method: 'POST', body: JSON.stringify({ email: $('email').value, password: $('password').value }) });
+    sessionStorage.setItem(APP_SESSION_KEY, '1');
     showApp();
     await refreshAll();
   });
@@ -565,13 +585,8 @@ $('registerBtn').addEventListener('click', async () => {
   });
 });
 
-$('logoutBtn').addEventListener('click', async () => {
-  await runAction(async () => {
-    await api('/api/auth/logout', { method: 'POST' });
-    state.user = null;
-    showAuth();
-  });
-});
+$('logoutBtn').addEventListener('click', () => logout());
+$('logoutTopBtn').addEventListener('click', () => logout());
 
 $('refreshBtn').addEventListener('click', refreshFromButton);
 $('refreshAdminBtn').addEventListener('click', () => runAction(refreshAdmin));

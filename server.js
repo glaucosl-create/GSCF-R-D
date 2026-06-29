@@ -116,7 +116,7 @@ function sendJson(res, status, payload) {
 }
 
 function setSessionCookie(res, token) {
-  res.setHeader('set-cookie', `session=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${60 * 60 * 24 * 30}`);
+  res.setHeader('set-cookie', `session=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/`);
 }
 
 function clearSessionCookie(res) {
