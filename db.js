@@ -139,6 +139,11 @@ async function initSqlite(dataDir) {
       notes TEXT DEFAULT '',
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+    CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
+    CREATE INDEX IF NOT EXISTS idx_invoices_user_month ON invoices(user_id, month);
+    CREATE INDEX IF NOT EXISTS idx_transactions_user_date ON transactions(user_id, date);
+    CREATE INDEX IF NOT EXISTS idx_transactions_user_group ON transactions(user_id, installment_group);
+    CREATE INDEX IF NOT EXISTS idx_transactions_user_invoice ON transactions(user_id, invoice_id);
   `);
 
   const userColumns = db.prepare('PRAGMA table_info(users)').all().map(column => column.name);
@@ -244,6 +249,11 @@ async function initPostgres() {
       notes TEXT DEFAULT '',
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+    CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
+    CREATE INDEX IF NOT EXISTS idx_invoices_user_month ON invoices(user_id, month);
+    CREATE INDEX IF NOT EXISTS idx_transactions_user_date ON transactions(user_id, date);
+    CREATE INDEX IF NOT EXISTS idx_transactions_user_group ON transactions(user_id, installment_group);
+    CREATE INDEX IF NOT EXISTS idx_transactions_user_invoice ON transactions(user_id, invoice_id);
     ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified INTEGER NOT NULL DEFAULT 1;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'user';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS account_status TEXT NOT NULL DEFAULT 'active';
@@ -330,7 +340,7 @@ export async function initDatabase({ dataDir }) {
     }),
     updateCard: prepare('UPDATE cards SET name=?, brand=?, limit_amount=?, closing_day=?, due_day=?, active=? WHERE id=? AND user_id=?'),
     deleteCard: prepare('DELETE FROM cards WHERE id=? AND user_id=?'),
-    listTransactions: prepare('SELECT t.*, c.name AS card_name FROM transactions t LEFT JOIN cards c ON c.id=t.card_id WHERE t.user_id=? ORDER BY t.date DESC, t.id DESC'),
+    listTransactions: prepare('SELECT t.*, c.name AS card_name FROM transactions t LEFT JOIN cards c ON c.id=t.card_id AND c.user_id=t.user_id WHERE t.user_id=? ORDER BY t.date DESC, t.id DESC'),
     insertTransaction: prepare({
       sqlite: `INSERT INTO transactions
         (user_id, type, date, description, category, amount, payment_method, card_id, invoice_id, installment_group, installment_index, installment_total, notes)
@@ -387,8 +397,13 @@ export async function initDatabase({ dataDir }) {
       sqlite: 'INSERT INTO invoices (user_id, card_id, month, original_name, stored_name, total_amount) VALUES (?, ?, ?, ?, ?, ?)',
       pg: 'INSERT INTO invoices (user_id, card_id, month, original_name, stored_name, total_amount) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id'
     }),
-    listInvoices: prepare('SELECT i.*, c.name AS card_name FROM invoices i LEFT JOIN cards c ON c.id=i.card_id WHERE i.user_id=? ORDER BY i.month DESC, i.id DESC'),
+    findInvoiceByUpload: prepare({
+      sqlite: 'SELECT * FROM invoices WHERE user_id = ? AND month = ? AND original_name = ? AND (card_id = ? OR (card_id IS NULL AND ? IS NULL)) LIMIT 1',
+      pg: 'SELECT * FROM invoices WHERE user_id = $1 AND month = $2 AND original_name = $3 AND (card_id = $4 OR (card_id IS NULL AND $5::integer IS NULL)) LIMIT 1'
+    }),
+    listInvoices: prepare('SELECT i.*, c.name AS card_name FROM invoices i LEFT JOIN cards c ON c.id=i.card_id AND c.user_id=i.user_id WHERE i.user_id=? ORDER BY i.month DESC, i.id DESC'),
     getInvoice: prepare('SELECT * FROM invoices WHERE id = ? AND user_id = ?'),
+    countInvoiceTransactions: prepare('SELECT COUNT(*) AS count FROM transactions WHERE user_id = ? AND invoice_id = ?'),
     deleteInvoiceTransactions: prepare('DELETE FROM transactions WHERE user_id = ? AND invoice_id = ?'),
     deleteInvoiceProjectedTransactions: prepare(`DELETE FROM transactions
       WHERE user_id = ?

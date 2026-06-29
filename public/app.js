@@ -689,10 +689,11 @@ $('registerBtn').addEventListener('click', async () => {
   await runAction(async () => {
     const credentials = { email: $('email').value, password: $('password').value };
     const result = await api('/api/auth/register', { method: 'POST', body: JSON.stringify(credentials) });
+    const verificationLink = escapeAttr(result.verificationLink || '#');
     $('verificationNotice').classList.remove('hidden');
     $('verificationNotice').innerHTML = result.emailSent
       ? 'Conta criada. Verifique seu email para confirmar o cadastro antes de entrar.'
-      : `Conta criada. Ambiente local sem SMTP configurado. Confirme pelo link: <a href="${result.verificationLink}">verificar email</a>`;
+      : `Conta criada. Ambiente local sem SMTP configurado. Confirme pelo link: <a href="${verificationLink}">verificar email</a>`;
     toast('Confirme seu email para ativar a conta.');
   });
 });

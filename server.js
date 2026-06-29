@@ -1,5 +1,5 @@
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { extname, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -18,6 +18,15 @@ mkdirSync(uploadDir, { recursive: true });
 
 const database = await initDatabase({ dataDir });
 const { statements, defaultCategories } = database;
+const MAX_JSON_BYTES = 1024 * 1024;
+const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
+
+class HttpError extends Error {
+  constructor(status, message) {
+    super(message);
+    this.status = status;
+  }
+}
 
 const mimeTypes = {
   '.html': 'text/html; charset=utf-8',
@@ -116,23 +125,36 @@ function sendJson(res, status, payload) {
 }
 
 function setSessionCookie(res, token) {
-  res.setHeader('set-cookie', `session=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/`);
+  const attrs = ['HttpOnly', 'SameSite=Lax', 'Path=/'];
+  if (process.env.NODE_ENV === 'production' || String(process.env.APP_BASE_URL || '').startsWith('https://')) attrs.push('Secure');
+  res.setHeader('set-cookie', `session=${encodeURIComponent(token)}; ${attrs.join('; ')}`);
 }
 
 function clearSessionCookie(res) {
-  res.setHeader('set-cookie', 'session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0');
+  const attrs = ['HttpOnly', 'SameSite=Lax', 'Path=/', 'Max-Age=0'];
+  if (process.env.NODE_ENV === 'production' || String(process.env.APP_BASE_URL || '').startsWith('https://')) attrs.push('Secure');
+  res.setHeader('set-cookie', `session=; ${attrs.join('; ')}`);
 }
 
-async function readBody(req) {
+async function readBody(req, limitBytes = MAX_JSON_BYTES) {
   const chunks = [];
-  for await (const chunk of req) chunks.push(chunk);
+  let size = 0;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > limitBytes) throw new HttpError(413, 'Conteudo enviado excede o limite permitido.');
+    chunks.push(chunk);
+  }
   return Buffer.concat(chunks);
 }
 
 async function readJson(req) {
   const body = await readBody(req);
   if (!body.length) return {};
-  return JSON.parse(body.toString('utf8'));
+  try {
+    return JSON.parse(body.toString('utf8'));
+  } catch {
+    throw new HttpError(400, 'JSON invalido.');
+  }
 }
 
 async function currentUser(req) {
@@ -241,8 +263,36 @@ function normalizeTransaction(input) {
   };
 }
 
-async function createInvoiceRows(userId, input) {
+function validateTransaction(tx) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(tx.date)) throw new HttpError(400, 'Data invalida.');
+  if (!tx.description) throw new HttpError(400, 'Informe a descricao.');
+  if (!tx.category) throw new HttpError(400, 'Informe a categoria.');
+  if (!Number.isFinite(tx.amount) || tx.amount <= 0) throw new HttpError(400, 'Informe um valor maior que zero.');
+  if (tx.installment_index > tx.installment_total) throw new HttpError(400, 'A parcela atual nao pode ser maior que o total de parcelas.');
+}
+
+async function validateOwnedReferences(userId, tx) {
+  if (tx.card_id && !(await statements.getCard.get(tx.card_id, userId))) {
+    throw new HttpError(400, 'Cartao invalido para este usuario.');
+  }
+  if (tx.invoice_id) {
+    const invoice = await statements.getInvoice.get(tx.invoice_id, userId);
+    if (!invoice) throw new HttpError(400, 'Fatura invalida para este usuario.');
+    if (tx.card_id && invoice.card_id && Number(invoice.card_id) !== Number(tx.card_id)) {
+      throw new HttpError(400, 'Cartao informado nao corresponde a fatura.');
+    }
+  }
+}
+
+async function normalizeAndValidateTransaction(userId, input) {
   const tx = normalizeTransaction(input);
+  validateTransaction(tx);
+  await validateOwnedReferences(userId, tx);
+  return tx;
+}
+
+async function createInvoiceRows(userId, input) {
+  const tx = await normalizeAndValidateTransaction(userId, input);
   const total = Math.max(1, Math.min(120, Number(tx.installment_total || input.installment_total || 1)));
   const current = Math.max(1, Math.min(total, Number(tx.installment_index || input.installment_index || 1)));
   const shouldProject = tx.type === 'expense' && tx.payment_method === 'credit_card' && total > current;
@@ -287,7 +337,7 @@ async function createInvoiceRows(userId, input) {
 }
 
 async function createTransactionRows(userId, input) {
-  const tx = normalizeTransaction(input);
+  const tx = await normalizeAndValidateTransaction(userId, input);
   const total = Math.max(1, Math.min(120, Number(input.installments || tx.installment_total || 1)));
   const current = Math.max(1, Math.min(total, Number(input.installment_index || tx.installment_index || 1)));
   const shouldProject = total > current && !input.id;
@@ -487,8 +537,8 @@ function parseInvoiceText(text, fallbackMonth) {
 async function parseMultipart(req) {
   const contentType = req.headers['content-type'] || '';
   const boundary = contentType.match(/boundary=(.+)$/)?.[1];
-  if (!boundary) throw new Error('Upload invalido.');
-  const body = await readBody(req);
+  if (!boundary) throw new HttpError(400, 'Upload invalido.');
+  const body = await readBody(req, MAX_UPLOAD_BYTES);
   const parts = body.toString('binary').split(`--${boundary}`);
   const fields = {};
   const files = {};
@@ -580,6 +630,7 @@ async function handleApi(req, res, url) {
 
   if (route(req.method, pathname, 'POST', '/api/webhooks/mercado-livre')) {
     const secret = process.env.ML_WEBHOOK_SECRET;
+    if (!secret) return sendJson(res, 503, { error: 'Webhook nao configurado.' });
     if (secret && req.headers['x-cf-webhook-secret'] !== secret) return sendJson(res, 401, { error: 'Webhook nao autorizado.' });
     const payload = await readJson(req);
     const order = orderFromWebhook(payload);
@@ -685,7 +736,7 @@ async function handleApi(req, res, url) {
   }
   if (pathname.startsWith('/api/transactions/') && req.method === 'PUT') {
     const id = Number(pathname.split('/').pop());
-    const tx = normalizeTransaction(await readJson(req));
+    const tx = await normalizeAndValidateTransaction(user.id, await readJson(req));
     await statements.updateTransaction.run(tx.type, tx.date, tx.description, tx.category, tx.amount, tx.payment_method, tx.card_id, tx.invoice_id, tx.installment_group, tx.installment_index, tx.installment_total, tx.notes, id, user.id);
     await statements.addCategory.run(user.id, tx.category, tx.type);
     return sendJson(res, 200, { ok: true });
@@ -703,6 +754,8 @@ async function handleApi(req, res, url) {
     const txProjected = (await statements.deleteInvoiceProjectedTransactions.run(user.id, user.id, id)).changes;
     const txDirect = (await statements.deleteInvoiceTransactions.run(user.id, id)).changes;
     await statements.deleteInvoice.run(id, user.id);
+    const storedPath = invoice.stored_name ? resolve(join(uploadDir, invoice.stored_name)) : '';
+    if (storedPath && storedPath.startsWith(uploadDir) && storedPath !== uploadDir && existsSync(storedPath)) unlinkSync(storedPath);
     return sendJson(res, 200, { ok: true, deleted_transactions: txDirect + txProjected });
   }
   if (route(req.method, pathname, 'POST', '/api/invoices/upload')) {
@@ -710,22 +763,31 @@ async function handleApi(req, res, url) {
     const file = files.pdf;
     if (!file || !file.filename.toLowerCase().endsWith('.pdf')) return sendJson(res, 400, { error: 'Anexe uma fatura em PDF.' });
     const month = fields.month || new Date().toISOString().slice(0, 7);
+    const cardId = fields.card_id ? Number(fields.card_id) : null;
+    if (cardId && !(await statements.getCard.get(cardId, user.id))) throw new HttpError(400, 'Cartao invalido para este usuario.');
+    if (await statements.findInvoiceByUpload.get(user.id, month, file.filename, cardId, cardId)) {
+      throw new HttpError(409, 'Esta fatura ja foi enviada para este cartao e periodo.');
+    }
     const stored = `${Date.now()}-${createHash('sha1').update(file.filename).digest('hex')}.pdf`;
     const filePath = join(uploadDir, stored);
     writeFileSync(filePath, file.buffer);
     const text = await extractPdfText(filePath);
     const parsed = parseInvoiceText(text, month);
-    const invoice = await statements.insertInvoice.run(user.id, fields.card_id ? Number(fields.card_id) : null, month, file.filename, stored, parsed.total);
+    const invoice = await statements.insertInvoice.run(user.id, cardId, month, file.filename, stored, parsed.total);
     return sendJson(res, 201, { invoice_id: invoice.lastInsertRowid, total: parsed.total, rows: parsed.rows, extracted_chars: text.length });
   }
   if (route(req.method, pathname, 'POST', '/api/invoices/import')) {
     const body = await readJson(req);
     const invoiceId = Number(body.invoice_id);
+    const invoice = await statements.getInvoice.get(invoiceId, user.id);
+    if (!invoice) throw new HttpError(404, 'Fatura nao encontrada.');
+    const alreadyImported = await statements.countInvoiceTransactions.get(user.id, invoiceId);
+    if (Number(alreadyImported?.count || 0) > 0) throw new HttpError(409, 'Esta fatura ja foi importada.');
     const rows = Array.isArray(body.rows) ? body.rows : [];
     let created = 0;
     let updated = 0;
     for (const row of rows) {
-      const result = await createInvoiceRows(user.id, { ...row, invoice_id: invoiceId, card_id: body.card_id || row.card_id, payment_method: 'credit_card' });
+      const result = await createInvoiceRows(user.id, { ...row, invoice_id: invoiceId, card_id: body.card_id || row.card_id || invoice.card_id, payment_method: 'credit_card' });
       created += result.created;
       updated += result.updated;
     }
@@ -754,7 +816,11 @@ const server = createServer(async (req, res) => {
     else serveStatic(req, res, url.pathname);
   } catch (error) {
     console.error(error);
-    sendJson(res, 500, { error: error.message || 'Erro interno.' });
+    const status = error.status || 500;
+    const message = error instanceof HttpError || process.env.NODE_ENV !== 'production'
+      ? error.message || 'Erro interno.'
+      : 'Erro interno.';
+    sendJson(res, status, { error: message });
   }
 });
 
