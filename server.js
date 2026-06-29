@@ -209,6 +209,21 @@ function monthAdd(dateText, index) {
   return date.toISOString().slice(0, 10);
 }
 
+function addMonthsToMonth(monthText, index) {
+  const [year, month] = monthText.split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1 + index, 1));
+  return date.toISOString().slice(0, 7);
+}
+
+function buildMonthRange(startMonth, endMonth, monthRows) {
+  const rows = [];
+  if (!startMonth || !endMonth || startMonth > endMonth) return rows;
+  for (let month = startMonth, index = 0; month <= endMonth; index += 1, month = addMonthsToMonth(startMonth, index)) {
+    rows.push(monthRows[month] || { month, income: 0, expense: 0, forecast_card: 0 });
+  }
+  return rows;
+}
+
 function normalizeTransaction(input) {
   return {
     type: input.type === 'income' ? 'income' : 'expense',
@@ -324,7 +339,12 @@ async function dashboard(userId, selectedMonth = null) {
     }
   }
 
-  const months = Object.values(monthRows).sort((a, b) => a.month.localeCompare(b.month)).slice(-12);
+  const knownMonths = Object.keys(monthRows);
+  const firstMonth = knownMonths.length ? knownMonths.reduce((min, month) => month < min ? month : min, thisMonth) : thisMonth;
+  const lastMonth = knownMonths.length ? knownMonths.reduce((max, month) => month > max ? month : max, activeMonth) : activeMonth;
+  const startMonth = firstMonth < thisMonth ? firstMonth : thisMonth;
+  const endMonth = lastMonth > activeMonth ? lastMonth : activeMonth;
+  const months = buildMonthRange(startMonth, endMonth, monthRows);
   const forecast = Object.values(monthRows)
     .filter(row => row.month >= thisMonth && row.forecast_card > 0)
     .sort((a, b) => a.month.localeCompare(b.month))

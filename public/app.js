@@ -13,6 +13,10 @@ const $ = (id) => document.getElementById(id);
 const money = (value) => Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const today = () => new Date().toISOString().slice(0, 10);
 const currentMonth = () => new Date().toISOString().slice(0, 7);
+const formatMonth = (month) => {
+  const [year, value] = String(month || '').split('-');
+  return year && value ? `${value}/${year}` : month;
+};
 let invoiceProgressTimer = null;
 let selectedDashboardMonth = currentMonth();
 let selectedTransactionMonth = 'all';
@@ -246,15 +250,15 @@ function renderDashboard(data) {
   $('expenseMetric').textContent = money(data.expenseMonth);
   $('balanceMetric').textContent = money(data.balanceMonth);
   renderBars('categoryBars', data.categories, 'name', 'amount');
-  renderBars('forecastBars', data.forecast, 'month', 'forecast_card', true);
+  renderBars('forecastBars', data.forecast.map(row => ({ ...row, month: formatMonth(row.month) })), 'month', 'forecast_card', true);
   renderMonthBars(data.months);
 }
 
 function renderDashboardMonthOptions(months, selectedMonth) {
   const knownMonths = months.map(row => row.month);
   if (!knownMonths.includes(selectedMonth)) knownMonths.push(selectedMonth);
-  knownMonths.sort((a, b) => b.localeCompare(a));
-  $('dashboardMonth').innerHTML = knownMonths.map(month => `<option value="${month}" ${month === selectedMonth ? 'selected' : ''}>${month}</option>`).join('');
+  knownMonths.sort((a, b) => a.localeCompare(b));
+  $('dashboardMonth').innerHTML = knownMonths.map(month => `<option value="${month}" ${month === selectedMonth ? 'selected' : ''}>${formatMonth(month)}</option>`).join('');
 }
 
 function renderBars(target, rows, labelKey, valueKey, alt = false) {
@@ -272,7 +276,7 @@ function renderMonthBars(rows) {
   const max = Math.max(1, ...rows.flatMap(row => [row.income, row.expense]));
   $('monthBars').innerHTML = rows.length ? rows.map(row => `
     <div class="bar-row">
-      <span>${row.month}</span>
+      <span>${formatMonth(row.month)}</span>
       <div class="bar-track"><div class="bar-fill" style="width:${Math.max(3, row.income / max * 100)}%"></div></div>
       <strong>${money(row.income)}</strong>
       <span></span>
