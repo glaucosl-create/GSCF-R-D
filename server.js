@@ -976,8 +976,15 @@ async function handleApi(req, res, url) {
     const month = fields.month || new Date().toISOString().slice(0, 7);
     const cardId = fields.card_id ? Number(fields.card_id) : null;
     if (cardId && !(await statements.getCard.get(cardId, user.id))) throw new HttpError(400, 'Cartao invalido para este usuario.');
-    if (await statements.findInvoiceByUpload.get(user.id, month, file.filename, cardId, cardId)) {
-      throw new HttpError(409, 'Esta fatura ja foi enviada para este cartao e periodo.');
+    const existingInvoice = await statements.findInvoiceByUpload.get(user.id, month, file.filename, cardId, cardId);
+    if (existingInvoice) {
+      const importedCount = await statements.countInvoiceTransactions.get(user.id, existingInvoice.id);
+      if (Number(importedCount?.count || 0) > 0) {
+        throw new HttpError(409, 'Esta fatura ja foi enviada para este cartao e periodo.');
+      }
+      await statements.deleteInvoice.run(existingInvoice.id, user.id);
+      const oldStoredPath = existingInvoice.stored_name ? resolve(join(uploadDir, existingInvoice.stored_name)) : '';
+      if (oldStoredPath && oldStoredPath.startsWith(uploadDir) && oldStoredPath !== uploadDir && existsSync(oldStoredPath)) unlinkSync(oldStoredPath);
     }
     const stored = `${Date.now()}-${createHash('sha1').update(file.filename).digest('hex')}.pdf`;
     const filePath = join(uploadDir, stored);
