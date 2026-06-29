@@ -231,32 +231,44 @@ async function createInvoiceRows(userId, input) {
   const total = Math.max(1, Math.min(120, Number(tx.installment_total || input.installment_total || 1)));
   const current = Math.max(1, Math.min(total, Number(tx.installment_index || input.installment_index || 1)));
   const shouldProject = tx.type === 'expense' && tx.payment_method === 'credit_card' && total > current;
-  const group = tx.installment_group || (shouldProject ? randomBytes(8).toString('hex') : null);
+  const existingCurrent = total > 1
+    ? await statements.findProjectedInstallment.get(userId, tx.type, tx.card_id, tx.card_id, current, total, tx.amount, tx.description)
+    : null;
+  const group = existingCurrent?.installment_group || tx.installment_group || (shouldProject ? randomBytes(8).toString('hex') : null);
   let created = 0;
+  let updated = 0;
 
   for (let index = current; index <= total; index++) {
     const date = monthAdd(tx.date, index - current);
     const projectedNotes = index === current ? tx.notes : [tx.notes, 'Parcela futura prevista a partir da fatura.'].filter(Boolean).join(' ');
-    await statements.insertTransaction.run(
-      userId,
-      tx.type,
-      date,
-      tx.description,
-      tx.category,
-      tx.amount,
-      tx.payment_method,
-      tx.card_id,
-      index === current ? tx.invoice_id : null,
-      group,
-      index,
-      total,
-      projectedNotes
-    );
+    const existingProjected = index === current
+      ? existingCurrent
+      : group ? await statements.findProjectedInstallmentByGroup.get(userId, group, index) : null;
+    if (existingProjected) {
+      await statements.updateTransaction.run(tx.type, date, tx.description, tx.category, tx.amount, tx.payment_method, tx.card_id, index === current ? tx.invoice_id : null, group, index, total, projectedNotes, existingProjected.id, userId);
+      updated += 1;
+    } else {
+      await statements.insertTransaction.run(
+        userId,
+        tx.type,
+        date,
+        tx.description,
+        tx.category,
+        tx.amount,
+        tx.payment_method,
+        tx.card_id,
+        index === current ? tx.invoice_id : null,
+        group,
+        index,
+        total,
+        projectedNotes
+      );
+      created += 1;
+    }
     await statements.addCategory.run(userId, tx.category, tx.type);
-    created += 1;
   }
 
-  return created;
+  return { created, updated };
 }
 
 async function createTransactionRows(userId, input) {
@@ -692,10 +704,13 @@ async function handleApi(req, res, url) {
     const invoiceId = Number(body.invoice_id);
     const rows = Array.isArray(body.rows) ? body.rows : [];
     let created = 0;
+    let updated = 0;
     for (const row of rows) {
-      created += await createInvoiceRows(user.id, { ...row, invoice_id: invoiceId, card_id: body.card_id || row.card_id, payment_method: 'credit_card' });
+      const result = await createInvoiceRows(user.id, { ...row, invoice_id: invoiceId, card_id: body.card_id || row.card_id, payment_method: 'credit_card' });
+      created += result.created;
+      updated += result.updated;
     }
-    return sendJson(res, 201, { created });
+    return sendJson(res, 201, { created, updated });
   }
 
   sendJson(res, 404, { error: 'Rota nao encontrada.' });

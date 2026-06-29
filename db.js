@@ -341,6 +341,31 @@ export async function initDatabase({ dataDir }) {
     }),
     updateTransaction: prepare(`UPDATE transactions SET type=?, date=?, description=?, category=?, amount=?, payment_method=?, card_id=?, invoice_id=?, installment_group=?, installment_index=?, installment_total=?, notes=? WHERE id=? AND user_id=?`),
     deleteTransaction: prepare('DELETE FROM transactions WHERE id=? AND user_id=?'),
+    findProjectedInstallment: prepare(`
+      SELECT *
+      FROM transactions
+      WHERE user_id = ?
+        AND invoice_id IS NULL
+        AND payment_method = 'credit_card'
+        AND type = ?
+        AND (card_id = ? OR (card_id IS NULL AND ? IS NULL))
+        AND installment_index = ?
+        AND installment_total = ?
+        AND ABS(amount - ?) < 0.011
+        AND lower(trim(description)) = lower(trim(?))
+      ORDER BY id
+      LIMIT 1
+    `),
+    findProjectedInstallmentByGroup: prepare(`
+      SELECT *
+      FROM transactions
+      WHERE user_id = ?
+        AND invoice_id IS NULL
+        AND installment_group = ?
+        AND installment_index = ?
+      ORDER BY id
+      LIMIT 1
+    `),
     insertInvoice: prepare({
       sqlite: 'INSERT INTO invoices (user_id, card_id, month, original_name, stored_name, total_amount) VALUES (?, ?, ?, ?, ?, ?)',
       pg: 'INSERT INTO invoices (user_id, card_id, month, original_name, stored_name, total_amount) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id'

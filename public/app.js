@@ -802,11 +802,13 @@ $('invoiceRows').addEventListener('change', updateInvoiceDraftField);
 $('importInvoiceBtn').addEventListener('click', async () => {
   if (!state.invoiceDraft) return;
   await runAction(async () => {
-    await api('/api/invoices/import', { method: 'POST', body: JSON.stringify(state.invoiceDraft) });
+    const result = await api('/api/invoices/import', { method: 'POST', body: JSON.stringify(state.invoiceDraft) });
     state.invoiceDraft = null;
     renderInvoiceDraft();
     await refreshAll();
-    toast('Lancamentos importados.');
+    const updated = Number(result.updated || 0);
+    const created = Number(result.created || 0);
+    toast(updated ? `${created} lancamentos criados e ${updated} previsoes confirmadas.` : 'Lancamentos importados.');
   });
 });
 
