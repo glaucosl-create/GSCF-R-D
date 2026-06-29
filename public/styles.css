@@ -282,7 +282,7 @@ nav { display: grid; gap: 8px; }
 }
 .transactions-filter {
   display: grid;
-  grid-template-columns: 1fr minmax(140px, 180px) minmax(150px, 190px) minmax(140px, 180px);
+  grid-template-columns: 1fr repeat(5, minmax(140px, 180px));
   gap: 12px;
   align-items: center;
 }
@@ -395,6 +395,28 @@ td select, td input {
   min-width: 150px;
 }
 td:last-child { text-align: right; white-space: nowrap; }
+
+.pagination-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.pagination-bar span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+.pagination-bar div {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.pagination-bar button:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
 
 .cards-list, .review-list { display: grid; gap: 10px; }
 .card {
@@ -516,5 +538,8 @@ td:last-child { text-align: right; white-space: nowrap; }
   .bar-row { grid-template-columns: 1fr; }
   .metrics { grid-template-columns: 1fr; }
   .transactions-filter { grid-template-columns: 1fr; }
+  .pagination-bar { align-items: stretch; flex-direction: column; }
+  .pagination-bar div { justify-content: stretch; }
+  .pagination-bar button { flex: 1; }
   .auth-panel { padding: 24px; }
 }

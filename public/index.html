@@ -128,6 +128,12 @@
             <option value="income">Receitas</option>
           </select>
           <select id="transactionMonthFilter"></select>
+          <select id="transactionCategoryFilter"></select>
+          <select id="transactionProjectionFilter">
+            <option value="all">Todos os lancamentos</option>
+            <option value="planned">Parcelas previstas</option>
+            <option value="future">Previstas futuras</option>
+          </select>
           <select id="transactionSort">
             <option value="desc">Mais recentes</option>
             <option value="asc">Mais antigos</option>
@@ -139,6 +145,13 @@
             <tbody id="transactionsTable"></tbody>
           </table>
         </div>
+        <section class="pagination-bar">
+          <span id="transactionPageInfo">0 lancamentos</span>
+          <div>
+            <button type="button" id="transactionPrevPage" class="secondary">Anterior</button>
+            <button type="button" id="transactionNextPage" class="secondary">Proxima</button>
+          </div>
+        </section>
       </section>
 
       <section id="categories" class="view">

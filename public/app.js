@@ -16,6 +16,9 @@ const currentMonth = () => new Date().toISOString().slice(0, 7);
 let invoiceProgressTimer = null;
 let selectedDashboardMonth = currentMonth();
 let selectedTransactionMonth = 'all';
+let selectedTransactionCategory = 'all';
+let transactionPage = 1;
+const TRANSACTION_PAGE_SIZE = 15;
 const THEME_KEY = 'cfdr-theme';
 const APP_SESSION_KEY = 'cfdr-active-session';
 
@@ -276,14 +279,26 @@ function renderTransactions() {
   renderTransactionFilters();
   const typeFilter = $('transactionTypeFilter').value;
   const monthFilter = $('transactionMonthFilter').value;
+  const categoryFilter = $('transactionCategoryFilter').value;
+  const projectionFilter = $('transactionProjectionFilter').value;
   const sort = $('transactionSort').value;
-  const rows = state.transactions
+  const filteredRows = state.transactions
     .filter(tx => typeFilter === 'all' || tx.type === typeFilter)
     .filter(tx => monthFilter === 'all' || tx.date.slice(0, 7) === monthFilter)
+    .filter(tx => categoryFilter === 'all' || transactionCategoryKey(tx) === categoryFilter)
+    .filter(tx => {
+      if (projectionFilter === 'planned') return isPlannedInstallment(tx);
+      if (projectionFilter === 'future') return isPlannedInstallment(tx) && tx.date >= today();
+      return true;
+    })
     .sort((a, b) => {
       const direction = sort === 'asc' ? 1 : -1;
       return direction * (a.date.localeCompare(b.date) || a.id - b.id);
     });
+  const totalPages = Math.max(1, Math.ceil(filteredRows.length / TRANSACTION_PAGE_SIZE));
+  transactionPage = Math.min(Math.max(1, transactionPage), totalPages);
+  const start = (transactionPage - 1) * TRANSACTION_PAGE_SIZE;
+  const rows = filteredRows.slice(start, start + TRANSACTION_PAGE_SIZE);
 
   $('transactionsTable').innerHTML = rows.length ? rows.map(tx => `
     <tr>
@@ -298,6 +313,7 @@ function renderTransactions() {
       </td>
     </tr>
   `).join('') : '<tr><td colspan="6">Nenhum lancamento encontrado para os filtros selecionados.</td></tr>';
+  renderTransactionPagination(filteredRows.length, start, rows.length, totalPages);
 }
 
 function renderTransactionFilters() {
@@ -309,6 +325,46 @@ function renderTransactionFilters() {
   ].join('');
   $('transactionMonthFilter').value = months.includes(current) ? current : 'all';
   selectedTransactionMonth = $('transactionMonthFilter').value;
+
+  const currentCategory = selectedTransactionCategory;
+  const typeFilter = $('transactionTypeFilter').value;
+  const categories = state.categories
+    .filter(category => typeFilter === 'all' || category.type === typeFilter)
+    .map(category => ({ key: `${category.type}::${category.name}`, label: `${category.type === 'income' ? 'Receita' : 'Despesa'} - ${category.name}` }));
+  const existingKeys = new Set(categories.map(category => category.key));
+  for (const tx of state.transactions) {
+    if (typeFilter !== 'all' && tx.type !== typeFilter) continue;
+    const key = transactionCategoryKey(tx);
+    if (!existingKeys.has(key)) {
+      categories.push({ key, label: `${tx.type === 'income' ? 'Receita' : 'Despesa'} - ${tx.category}` });
+      existingKeys.add(key);
+    }
+  }
+  categories.sort((a, b) => a.label.localeCompare(b.label, 'pt-BR'));
+  $('transactionCategoryFilter').innerHTML = [
+    '<option value="all">Todas as categorias</option>',
+    ...categories.map(category => `<option value="${escapeAttr(category.key)}">${escapeHtml(category.label)}</option>`)
+  ].join('');
+  $('transactionCategoryFilter').value = existingKeys.has(currentCategory) ? currentCategory : 'all';
+  selectedTransactionCategory = $('transactionCategoryFilter').value;
+}
+
+function renderTransactionPagination(totalRows, start, pageRows, totalPages) {
+  const from = totalRows ? start + 1 : 0;
+  const to = start + pageRows;
+  $('transactionPageInfo').textContent = totalRows
+    ? `${from}-${to} de ${totalRows} lancamentos | pagina ${transactionPage} de ${totalPages}`
+    : '0 lancamentos';
+  $('transactionPrevPage').disabled = transactionPage <= 1;
+  $('transactionNextPage').disabled = transactionPage >= totalPages;
+}
+
+function transactionCategoryKey(tx) {
+  return `${tx.type}::${tx.category}`;
+}
+
+function isPlannedInstallment(tx) {
+  return tx.type === 'expense' && tx.payment_method === 'credit_card' && Number(tx.installment_total || 1) > 1;
 }
 
 function renderCards() {
@@ -600,12 +656,37 @@ $('cancelTxEditBtn').addEventListener('click', clearTxForm);
 $('clearCardBtn').addEventListener('click', clearCardForm);
 $('clearCategoryBtn').addEventListener('click', clearCategoryForm);
 $('txType').addEventListener('change', renderCategories);
-$('transactionTypeFilter').addEventListener('change', renderTransactions);
-$('transactionMonthFilter').addEventListener('change', () => {
-  selectedTransactionMonth = $('transactionMonthFilter').value;
+$('transactionTypeFilter').addEventListener('change', () => {
+  transactionPage = 1;
+  selectedTransactionCategory = 'all';
   renderTransactions();
 });
-$('transactionSort').addEventListener('change', renderTransactions);
+$('transactionMonthFilter').addEventListener('change', () => {
+  selectedTransactionMonth = $('transactionMonthFilter').value;
+  transactionPage = 1;
+  renderTransactions();
+});
+$('transactionCategoryFilter').addEventListener('change', () => {
+  selectedTransactionCategory = $('transactionCategoryFilter').value;
+  transactionPage = 1;
+  renderTransactions();
+});
+$('transactionProjectionFilter').addEventListener('change', () => {
+  transactionPage = 1;
+  renderTransactions();
+});
+$('transactionSort').addEventListener('change', () => {
+  transactionPage = 1;
+  renderTransactions();
+});
+$('transactionPrevPage').addEventListener('click', () => {
+  transactionPage = Math.max(1, transactionPage - 1);
+  renderTransactions();
+});
+$('transactionNextPage').addEventListener('click', () => {
+  transactionPage += 1;
+  renderTransactions();
+});
 
 $('transactionForm').addEventListener('submit', async (event) => {
   event.preventDefault();
