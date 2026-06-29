@@ -340,9 +340,8 @@ async function dashboard(userId, selectedMonth = null) {
   }
 
   const knownMonths = Object.keys(monthRows);
-  const firstMonth = knownMonths.length ? knownMonths.reduce((min, month) => month < min ? month : min, thisMonth) : thisMonth;
   const lastMonth = knownMonths.length ? knownMonths.reduce((max, month) => month > max ? month : max, activeMonth) : activeMonth;
-  const startMonth = firstMonth < thisMonth ? firstMonth : thisMonth;
+  const startMonth = activeMonth < thisMonth ? activeMonth : thisMonth;
   const endMonth = lastMonth > activeMonth ? lastMonth : activeMonth;
   const months = buildMonthRange(startMonth, endMonth, monthRows);
   const forecast = Object.values(monthRows)
