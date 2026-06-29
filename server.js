@@ -204,7 +204,8 @@ function toNumber(value, fallback = 0) {
 
 function monthAdd(dateText, index) {
   const [year, month, day] = dateText.split('-').map(Number);
-  const date = new Date(Date.UTC(year, month - 1 + index, Math.min(day, 28)));
+  const lastDay = new Date(Date.UTC(year, month + index, 0)).getUTCDate();
+  const date = new Date(Date.UTC(year, month - 1 + index, Math.min(day, lastDay)));
   return date.toISOString().slice(0, 10);
 }
 
