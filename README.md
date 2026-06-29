@@ -61,6 +61,15 @@ $env:SMTP_FROM="usuario@dominio.com"
 
 Sem SMTP configurado, o app mostra o link de verificacao na tela para uso local.
 
+Em hospedagens gratuitas que bloqueiam portas SMTP, como pode acontecer com portas 25, 465 e 587, use envio por API HTTPS:
+
+```powershell
+$env:RESEND_API_KEY="re_xxxxxxxxx"
+$env:RESEND_FROM="CF-RD <onboarding@resend.dev>"
+```
+
+Quando `RESEND_API_KEY` estiver configurado, o app usa a API de email antes de tentar SMTP.
+
 ## Controle de acesso e vendas
 
 Novas contas ficam com status `aguardando pagamento` depois da verificacao de email. Um administrador precisa liberar o acesso na tela **Admin** ou configurar a automacao de venda.

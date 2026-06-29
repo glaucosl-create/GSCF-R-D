@@ -39,9 +39,13 @@ SMTP_PORT=587
 SMTP_USER=usuario
 SMTP_PASS=senha
 SMTP_FROM=usuario@dominio.com
+RESEND_API_KEY=re_xxxxxxxxx
+RESEND_FROM=CF-RD <onboarding@resend.dev>
 ```
 
 As variaveis SMTP podem ficar vazias enquanto voce estiver apenas testando o deploy, mas o cadastro por email real so envia link quando SMTP estiver configurado.
+
+Se o plano gratuito bloquear SMTP, use `RESEND_API_KEY` e `RESEND_FROM` para envio por API HTTPS.
 
 ## 3. Migrar os dados locais
 

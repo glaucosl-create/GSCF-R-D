@@ -52,11 +52,39 @@ function smtpTransport() {
     host: process.env.SMTP_HOST,
     port: Number(process.env.SMTP_PORT || 587),
     secure: process.env.SMTP_SECURE === 'true',
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 15000,
     auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
   });
 }
 
+async function sendVerificationEmailWithApi(email, link) {
+  if (!process.env.RESEND_API_KEY) return false;
+  const response = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+      'content-type': 'application/json'
+    },
+    body: JSON.stringify({
+      from: process.env.RESEND_FROM || 'CF-RD <onboarding@resend.dev>',
+      to: [email],
+      subject: 'Confirme seu cadastro no CF-R&D',
+      text: `Confirme seu cadastro acessando este link: ${link}`,
+      html: `<p>Confirme seu cadastro no CF-R&amp;D acessando o link abaixo:</p><p><a href="${link}">${link}</a></p>`
+    })
+  });
+  if (!response.ok) {
+    const details = await response.text().catch(() => '');
+    throw new Error(`Falha ao enviar email pela API: ${response.status} ${details.slice(0, 200)}`);
+  }
+  return true;
+}
+
 async function sendVerificationEmail(email, link) {
+  const apiSent = await sendVerificationEmailWithApi(email, link);
+  if (apiSent) return true;
   const transport = smtpTransport();
   if (!transport) return false;
   await transport.sendMail({
@@ -416,19 +444,25 @@ async function handleApi(req, res, url) {
   if (route(req.method, pathname, 'POST', '/api/auth/register')) {
     const { email, password } = await readJson(req);
     if (!email || !password || password.length < 6) return sendJson(res, 400, { error: 'Informe email e senha com pelo menos 6 caracteres.' });
+    let result;
+    const normalizedEmail = String(email).toLowerCase().trim();
     try {
-      const normalizedEmail = String(email).toLowerCase().trim();
-      const result = await statements.createUnverifiedUser.run(normalizedEmail, hashPassword(password));
-      await ensureDefaultCategories(result.lastInsertRowid);
-      const token = randomBytes(32).toString('hex');
-      const expires = new Date(Date.now() + 1000 * 60 * 60 * 24).toISOString();
-      await statements.createVerification.run(token, result.lastInsertRowid, expires);
-      const verificationLink = `${publicBaseUrl(req)}/api/auth/verify?token=${token}`;
-      const emailSent = await sendVerificationEmail(normalizedEmail, verificationLink);
-      return sendJson(res, 201, { ok: true, requiresVerification: true, emailSent, verificationLink: emailSent ? undefined : verificationLink });
+      result = await statements.createUnverifiedUser.run(normalizedEmail, hashPassword(password));
     } catch {
       return sendJson(res, 409, { error: 'Email ja cadastrado.' });
     }
+    await ensureDefaultCategories(result.lastInsertRowid);
+    const token = randomBytes(32).toString('hex');
+    const expires = new Date(Date.now() + 1000 * 60 * 60 * 24).toISOString();
+    await statements.createVerification.run(token, result.lastInsertRowid, expires);
+    const verificationLink = `${publicBaseUrl(req)}/api/auth/verify?token=${token}`;
+    let emailSent = false;
+    try {
+      emailSent = await sendVerificationEmail(normalizedEmail, verificationLink);
+    } catch (error) {
+      console.error(`Falha ao enviar email de verificacao: ${error.message}`);
+    }
+    return sendJson(res, 201, { ok: true, requiresVerification: true, emailSent, verificationLink: emailSent ? undefined : verificationLink });
   }
 
   if (route(req.method, pathname, 'GET', '/api/auth/verify')) {
