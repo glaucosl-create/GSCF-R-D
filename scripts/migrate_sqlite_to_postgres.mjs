@@ -1,5 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 import pg from 'pg';
+import { initDatabase } from '../db.js';
 
 const { Pool } = pg;
 const sqlitePath = process.argv[2] || 'data/financeiro.sqlite';
@@ -31,6 +32,8 @@ const columnNames = (table) => sqlite.prepare(`PRAGMA table_info(${table})`).all
 const rowsFor = (table) => sqlite.prepare(`SELECT * FROM ${table}`).all();
 
 try {
+  const initialized = await initDatabase({ dataDir: 'data' });
+  await initialized.close();
   await pool.query('BEGIN');
   for (const table of tables) {
     const columns = columnNames(table);
