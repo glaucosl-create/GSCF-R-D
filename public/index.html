@@ -323,6 +323,11 @@
             <h3>Itens detectados</h3>
             <button id="importInvoiceBtn">Importar lancamentos</button>
           </div>
+          <div id="invoiceDraftSummary" class="invoice-draft-summary hidden" aria-live="polite">
+            <span><strong id="invoiceDraftCount">0</strong> itens detectados</span>
+            <span>Total dos itens: <strong id="invoiceDraftTotal">R$ 0,00</strong></span>
+            <span id="invoiceDraftDifference"></span>
+          </div>
           <div id="invoiceRows" class="review-list"></div>
           <details id="invoiceExtractPanel" class="extract-panel">
             <summary>Texto extraido do PDF</summary>

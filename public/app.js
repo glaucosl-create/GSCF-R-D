@@ -621,11 +621,24 @@ function renderAdmin() {
   `).join('') : '<p class="empty">Nenhuma venda recebida ainda.</p>';
 }
 
+function renderInvoiceDraftSummary() {
+  const rows = state.invoiceDraft?.rows || [];
+  const total = rows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+  const invoiceTotal = Number(state.invoiceDraft?.total || 0);
+  $('invoiceDraftSummary').classList.toggle('hidden', !state.invoiceDraft);
+  $('invoiceDraftCount').textContent = rows.length;
+  $('invoiceDraftTotal').textContent = money(total);
+  $('invoiceDraftDifference').textContent = invoiceTotal
+    ? `Total informado no PDF: ${money(invoiceTotal)} | Diferenca: ${money(invoiceTotal - total)}`
+    : '';
+}
+
 function renderInvoiceDraft() {
   const rows = state.invoiceDraft?.rows || [];
   $('invoiceReview').classList.toggle('hidden', !state.invoiceDraft);
   $('invoiceExtractPanel').classList.toggle('hidden', !state.invoiceDraft?.extracted_text);
   $('invoiceExtractText').value = state.invoiceDraft?.extracted_text || '';
+  renderInvoiceDraftSummary();
   $('invoiceRows').innerHTML = rows.map((row, index) => `
     <div class="review-row invoice-review-row" data-row="${index}">
       <input type="date" value="${row.date}" data-invoice-field="date">
@@ -1203,6 +1216,7 @@ function updateInvoiceDraftField(event) {
   const row = state.invoiceDraft.rows[Number(rowEl.dataset.row)];
   const numericFields = ['amount', 'installment_index', 'installment_total'];
   row[event.target.dataset.invoiceField] = numericFields.includes(event.target.dataset.invoiceField) ? Number(event.target.value) : event.target.value;
+  renderInvoiceDraftSummary();
 }
 
 $('invoiceRows').addEventListener('input', updateInvoiceDraftField);

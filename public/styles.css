@@ -467,6 +467,26 @@ td:last-child { text-align: right; white-space: nowrap; }
   gap: 12px;
   margin-bottom: 12px;
 }
+.invoice-draft-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--primary) 7%, var(--surface));
+  color: var(--muted);
+  font-size: 13px;
+}
+.invoice-draft-summary strong {
+  color: var(--ink);
+}
+.invoice-draft-summary span:nth-child(2) strong {
+  color: var(--primary-strong);
+  font-size: 15px;
+}
 .review-row {
   display: grid;
   grid-template-columns: 140px 1.4fr 1fr 120px 46px;
