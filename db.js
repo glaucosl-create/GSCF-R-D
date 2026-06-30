@@ -399,6 +399,7 @@ export async function initDatabase({ dataDir }) {
     updateCard: prepare('UPDATE cards SET name=?, brand=?, limit_amount=?, closing_day=?, due_day=?, active=? WHERE id=? AND user_id=?'),
     deleteCard: prepare('DELETE FROM cards WHERE id=? AND user_id=?'),
     listTransactions: prepare('SELECT t.*, c.name AS card_name FROM transactions t LEFT JOIN cards c ON c.id=t.card_id AND c.user_id=t.user_id WHERE t.user_id=? ORDER BY t.date DESC, t.id DESC'),
+    getTransaction: prepare('SELECT * FROM transactions WHERE id = ? AND user_id = ?'),
     insertTransaction: prepare({
       sqlite: `INSERT INTO transactions
         (user_id, type, date, description, category, amount, payment_method, card_id, invoice_id, installment_group, installment_index, installment_total, notes)
@@ -409,6 +410,9 @@ export async function initDatabase({ dataDir }) {
     }),
     updateTransaction: prepare(`UPDATE transactions SET type=?, date=?, description=?, category=?, amount=?, payment_method=?, card_id=?, invoice_id=?, installment_group=?, installment_index=?, installment_total=?, notes=? WHERE id=? AND user_id=?`),
     deleteTransaction: prepare('DELETE FROM transactions WHERE id=? AND user_id=?'),
+    listInstallmentGroup: prepare('SELECT * FROM transactions WHERE user_id = ? AND installment_group = ? ORDER BY installment_index, id'),
+    deleteTransactionGroupAfter: prepare('DELETE FROM transactions WHERE user_id = ? AND installment_group = ? AND installment_index > ?'),
+    deleteTransactionGroupExcept: prepare('DELETE FROM transactions WHERE user_id = ? AND installment_group = ? AND id <> ?'),
     listInvestmentAssets: prepare('SELECT * FROM investment_assets WHERE user_id = ? ORDER BY asset_type, ticker'),
     getInvestmentAsset: prepare('SELECT * FROM investment_assets WHERE id = ? AND user_id = ?'),
     insertInvestmentAsset: prepare({

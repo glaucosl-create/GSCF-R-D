@@ -648,7 +648,7 @@ function readTxForm() {
     invoice_id: original?.invoice_id || null,
     installment_group: original?.installment_group || null,
     installment_index: original?.installment_index || 1,
-    installment_total: original?.installment_total || Number($('txInstallments').value || 1),
+    installment_total: Number($('txInstallments').value || 1),
     notes: $('txNotes').value
   };
 }

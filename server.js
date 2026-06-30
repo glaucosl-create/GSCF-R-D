@@ -365,6 +365,72 @@ async function createTransactionRows(userId, input) {
   return rows.length;
 }
 
+async function updateTransactionRows(userId, id, input) {
+  const existing = await statements.getTransaction.get(id, userId);
+  if (!existing) throw new HttpError(404, 'Lancamento nao encontrado.');
+
+  const tx = normalizeTransaction({
+    ...input,
+    invoice_id: input.invoice_id ?? existing.invoice_id,
+    installment_group: input.installment_group ?? existing.installment_group,
+    installment_index: input.installment_index ?? existing.installment_index,
+    installment_total: input.installment_total ?? existing.installment_total
+  });
+  const total = Math.max(1, Math.min(120, Number(input.installments || tx.installment_total || 1)));
+  const current = Math.max(1, Math.min(total, Number(input.installment_index || tx.installment_index || 1)));
+  tx.installment_index = current;
+  tx.installment_total = total;
+  validateTransaction(tx);
+  await validateOwnedReferences(userId, tx);
+
+  const hadInstallmentSeries = existing.installment_group || Number(existing.installment_total || 1) > 1;
+  if (!hadInstallmentSeries && total === 1) {
+    await statements.updateTransaction.run(tx.type, tx.date, tx.description, tx.category, tx.amount, tx.payment_method, tx.card_id, tx.invoice_id, null, 1, 1, tx.notes, id, userId);
+    await statements.addCategory.run(userId, tx.category, tx.type);
+    return { updated: 1, created: 0, deleted: 0 };
+  }
+
+  const group = existing.installment_group || tx.installment_group || randomBytes(8).toString('hex');
+  if (total === 1) {
+    const deleted = existing.installment_group
+      ? (await statements.deleteTransactionGroupExcept.run(userId, existing.installment_group, id)).changes
+      : 0;
+    await statements.updateTransaction.run(tx.type, tx.date, tx.description, tx.category, tx.amount, tx.payment_method, tx.card_id, tx.invoice_id, null, 1, 1, tx.notes, id, userId);
+    await statements.addCategory.run(userId, tx.category, tx.type);
+    return { updated: 1, created: 0, deleted };
+  }
+
+  const groupRows = existing.installment_group
+    ? await statements.listInstallmentGroup.all(userId, existing.installment_group)
+    : [existing];
+  const rowsByIndex = new Map();
+  for (const row of groupRows) {
+    const index = Number(row.installment_index || 1);
+    if (!rowsByIndex.has(index)) rowsByIndex.set(index, row);
+  }
+
+  const baseDate = monthAdd(tx.date, 1 - current);
+  let updated = 0;
+  let created = 0;
+  for (let index = 1; index <= total; index++) {
+    const row = rowsByIndex.get(index);
+    const date = monthAdd(baseDate, index - 1);
+    const notes = index === current ? tx.notes : [tx.notes, 'Parcela futura prevista a partir de lancamento manual.'].filter(Boolean).join(' ');
+    const invoiceId = row?.invoice_id || (index === current ? tx.invoice_id : null);
+    if (row) {
+      await statements.updateTransaction.run(tx.type, date, tx.description, tx.category, tx.amount, tx.payment_method, tx.card_id, invoiceId, group, index, total, notes, row.id, userId);
+      updated += 1;
+    } else {
+      await statements.insertTransaction.run(userId, tx.type, date, tx.description, tx.category, tx.amount, tx.payment_method, tx.card_id, invoiceId, group, index, total, notes);
+      created += 1;
+    }
+  }
+
+  const deleted = (await statements.deleteTransactionGroupAfter.run(userId, group, total)).changes;
+  await statements.addCategory.run(userId, tx.category, tx.type);
+  return { updated, created, deleted };
+}
+
 const investmentTypes = new Set(['renda_fixa', 'acoes', 'fiis', 'fundos', 'tesouro', 'crypto', 'previdencia', 'outros']);
 const investmentKinds = new Set(['buy', 'sell', 'dividend', 'interest', 'fee']);
 
@@ -1139,10 +1205,8 @@ async function handleApi(req, res, url) {
   }
   if (pathname.startsWith('/api/transactions/') && req.method === 'PUT') {
     const id = Number(pathname.split('/').pop());
-    const tx = await normalizeAndValidateTransaction(user.id, await readJson(req));
-    await statements.updateTransaction.run(tx.type, tx.date, tx.description, tx.category, tx.amount, tx.payment_method, tx.card_id, tx.invoice_id, tx.installment_group, tx.installment_index, tx.installment_total, tx.notes, id, user.id);
-    await statements.addCategory.run(user.id, tx.category, tx.type);
-    return sendJson(res, 200, { ok: true });
+    const result = await updateTransactionRows(user.id, id, await readJson(req));
+    return sendJson(res, 200, { ok: true, ...result });
   }
   if (pathname.startsWith('/api/transactions/') && req.method === 'DELETE') {
     await statements.deleteTransaction.run(Number(pathname.split('/').pop()), user.id);
