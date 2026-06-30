@@ -749,6 +749,7 @@ async function dashboard(userId, selectedMonth = null) {
   const activeMonth = selectedMonth || thisMonth;
   const monthRows = {};
   const categories = {};
+  const cardTotals = {};
   let incomeMonth = 0;
   let expenseMonth = 0;
 
@@ -762,6 +763,12 @@ async function dashboard(userId, selectedMonth = null) {
       else {
         expenseMonth += tx.amount;
         categories[tx.category] = (categories[tx.category] || 0) + tx.amount;
+        if (tx.payment_method === 'credit_card') {
+          const cardKey = tx.card_id || 'none';
+          cardTotals[cardKey] ||= { card_id: tx.card_id || null, name: tx.card_name || 'Sem cartao', amount: 0, count: 0 };
+          cardTotals[cardKey].amount += Number(tx.amount || 0);
+          cardTotals[cardKey].count += 1;
+        }
       }
     }
   }
@@ -788,6 +795,7 @@ async function dashboard(userId, selectedMonth = null) {
     expenseMonth,
     balanceMonth: incomeMonth - expenseMonth,
     categories: Object.entries(categories).map(([name, amount]) => ({ name, amount })).sort((a, b) => b.amount - a.amount),
+    cardsMonthly: Object.values(cardTotals).sort((a, b) => b.amount - a.amount),
     months,
     activityMonths,
     forecast

@@ -300,6 +300,7 @@ function renderDashboard(data) {
   $('expenseMetric').textContent = money(data.expenseMonth);
   $('balanceMetric').textContent = money(data.balanceMonth);
   renderBars('categoryBars', data.categories, 'name', 'amount');
+  renderBars('cardMonthBars', data.cardsMonthly || [], 'name', 'amount', true);
   renderBars('forecastBars', data.forecast.map(row => ({ ...row, month: formatMonth(row.month) })), 'month', 'forecast_card', true);
   const activityMonths = data.activityMonths || data.months.filter(row =>
     Number(row.income || 0) !== 0

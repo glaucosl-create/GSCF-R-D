@@ -316,6 +316,11 @@ nav { display: grid; gap: 8px; }
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 22px;
 }
+.grid.three {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 22px;
+}
 .bars { display: grid; gap: 11px; }
 .bar-row {
   display: grid;
@@ -589,7 +594,7 @@ td:last-child { text-align: right; white-space: nowrap; }
   .app-shell { grid-template-columns: 1fr; }
   .sidebar { position: static; }
   nav { grid-template-columns: repeat(3, 1fr); }
-  .metrics, .grid.two, .auth-panel { grid-template-columns: 1fr; }
+  .metrics, .grid.two, .grid.three, .auth-panel { grid-template-columns: 1fr; }
   .topbar { align-items: flex-start; }
   .dashboard-filter { grid-template-columns: 1fr; }
   .transactions-filter { grid-template-columns: 1fr 1fr; }
