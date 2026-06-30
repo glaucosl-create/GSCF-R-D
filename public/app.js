@@ -140,6 +140,7 @@ function showApp() {
   $('appView').classList.remove('hidden');
   $('appView').classList.remove('locked');
   $('userEmail').textContent = state.user.email;
+  renderNotificationSettings();
   document.querySelectorAll('.admin-only').forEach(element => element.classList.toggle('hidden', state.user.role !== 'admin'));
 }
 
@@ -565,6 +566,17 @@ function renderInvoices() {
       </div>
     </article>
   `).join('') : '<p>Nenhuma fatura importada.</p>';
+}
+
+function renderNotificationSettings() {
+  if (!$('notificationForm') || !state.user) return;
+  $('whatsappPhone').value = state.user.whatsapp_phone || '';
+  $('notifyWhatsappEnabled').checked = Boolean(Number(state.user.notify_whatsapp_enabled || 0));
+  $('notifyClosingDays').value = Number(state.user.notify_closing_days ?? 3);
+  $('notifyDueDays').value = Number(state.user.notify_due_days ?? 3);
+  $('notificationStatus').textContent = state.user.whatsapp_phone
+    ? 'Avisos configurados para o telefone cadastrado. O envio real depende da API de WhatsApp estar configurada no servidor.'
+    : 'Cadastre o telefone para receber avisos dos seus cartoes.';
 }
 
 function renderAdmin() {
@@ -1047,6 +1059,40 @@ $('categoryForm').addEventListener('submit', async (event) => {
     clearCategoryForm();
     await refreshAll();
     toast('Categoria salva.');
+  });
+});
+
+$('notificationForm').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  await runAction(async () => {
+    const result = await api('/api/me/notifications', {
+      method: 'PUT',
+      body: JSON.stringify({
+        whatsapp_phone: $('whatsappPhone').value,
+        notify_whatsapp_enabled: $('notifyWhatsappEnabled').checked,
+        notify_closing_days: Number($('notifyClosingDays').value || 0),
+        notify_due_days: Number($('notifyDueDays').value || 0)
+      })
+    });
+    state.user = result.user;
+    renderNotificationSettings();
+    toast('Avisos salvos.');
+  });
+});
+
+$('testWhatsappBtn').addEventListener('click', async () => {
+  await runAction(async () => {
+    const button = $('testWhatsappBtn');
+    const originalText = button.textContent;
+    button.disabled = true;
+    button.textContent = 'Enviando...';
+    try {
+      await api('/api/me/notifications/test', { method: 'POST' });
+      toast('Teste enviado pelo WhatsApp.');
+    } finally {
+      button.disabled = false;
+      button.textContent = originalText;
+    }
   });
 });
 

@@ -32,6 +32,7 @@ http://localhost:3060
 - Revisao dos itens detectados antes de importar.
 - Deteccao de parcelas no formato `4/12`, `01/10` etc. e previsao das parcelas futuras.
 - Dashboard com receitas, despesas, saldo, gastos por categoria e previsao das parcelas.
+- Avisos de fechamento e vencimento de cartoes por WhatsApp, com telefone e antecedencia configurados pelo usuario.
 - Area Admin para liberar, bloquear e definir validade de acesso de usuarios.
 - Recebimento inicial de webhook de vendas do Mercado Livre para auditoria e futura automacao.
 

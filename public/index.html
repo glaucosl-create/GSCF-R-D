@@ -337,6 +337,18 @@
 
       <section id="account" class="view">
         <section>
+          <h3>Avisos por WhatsApp</h3>
+          <form id="notificationForm" class="form-grid compact">
+            <input id="whatsappPhone" inputmode="tel" placeholder="WhatsApp com DDD. Ex: 82999999999">
+            <input id="notifyClosingDays" type="number" min="0" max="30" placeholder="Dias antes do fechamento">
+            <input id="notifyDueDays" type="number" min="0" max="30" placeholder="Dias antes do vencimento">
+            <label class="check"><input id="notifyWhatsappEnabled" type="checkbox"> Enviar avisos por WhatsApp</label>
+            <button type="submit">Salvar avisos</button>
+            <button type="button" id="testWhatsappBtn" class="secondary">Enviar teste</button>
+          </form>
+          <p id="notificationStatus" class="muted">Cadastre o telefone para receber avisos dos seus cartoes.</p>
+        </section>
+        <section>
           <h3>Seguranca da conta</h3>
           <form id="passwordForm" class="form-grid compact">
             <input id="currentPassword" type="password" placeholder="Senha atual" autocomplete="current-password" required>

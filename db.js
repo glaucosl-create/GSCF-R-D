@@ -60,6 +60,10 @@ async function initSqlite(dataDir) {
       role TEXT NOT NULL DEFAULT 'user',
       account_status TEXT NOT NULL DEFAULT 'active',
       paid_until TEXT,
+      whatsapp_phone TEXT DEFAULT '',
+      notify_whatsapp_enabled INTEGER NOT NULL DEFAULT 0,
+      notify_closing_days INTEGER NOT NULL DEFAULT 3,
+      notify_due_days INTEGER NOT NULL DEFAULT 3,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
     CREATE TABLE IF NOT EXISTS sessions (
@@ -110,6 +114,20 @@ async function initSqlite(dataDir) {
       closing_day INTEGER DEFAULT 1,
       due_day INTEGER DEFAULT 10,
       active INTEGER DEFAULT 1
+    );
+    CREATE TABLE IF NOT EXISTS card_reminder_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      card_id INTEGER NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+      reminder_type TEXT NOT NULL CHECK(reminder_type IN ('closing','due')),
+      reminder_date TEXT NOT NULL,
+      target_date TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'sent',
+      channel TEXT NOT NULL DEFAULT 'whatsapp',
+      message TEXT DEFAULT '',
+      provider_response TEXT DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(user_id, card_id, reminder_type, reminder_date, target_date)
     );
     CREATE TABLE IF NOT EXISTS invoices (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -170,6 +188,7 @@ async function initSqlite(dataDir) {
     CREATE INDEX IF NOT EXISTS idx_transactions_user_date ON transactions(user_id, date);
     CREATE INDEX IF NOT EXISTS idx_transactions_user_group ON transactions(user_id, installment_group);
     CREATE INDEX IF NOT EXISTS idx_transactions_user_invoice ON transactions(user_id, invoice_id);
+    CREATE INDEX IF NOT EXISTS idx_card_reminder_logs_user_date ON card_reminder_logs(user_id, reminder_date);
     CREATE INDEX IF NOT EXISTS idx_investment_assets_user ON investment_assets(user_id, asset_type, ticker);
     CREATE INDEX IF NOT EXISTS idx_investment_movements_user_date ON investment_movements(user_id, date);
     CREATE INDEX IF NOT EXISTS idx_investment_movements_asset ON investment_movements(asset_id, date);
@@ -180,6 +199,10 @@ async function initSqlite(dataDir) {
   if (!userColumns.includes('role')) db.exec("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'");
   if (!userColumns.includes('account_status')) db.exec("ALTER TABLE users ADD COLUMN account_status TEXT NOT NULL DEFAULT 'active'");
   if (!userColumns.includes('paid_until')) db.exec('ALTER TABLE users ADD COLUMN paid_until TEXT');
+  if (!userColumns.includes('whatsapp_phone')) db.exec("ALTER TABLE users ADD COLUMN whatsapp_phone TEXT DEFAULT ''");
+  if (!userColumns.includes('notify_whatsapp_enabled')) db.exec('ALTER TABLE users ADD COLUMN notify_whatsapp_enabled INTEGER NOT NULL DEFAULT 0');
+  if (!userColumns.includes('notify_closing_days')) db.exec('ALTER TABLE users ADD COLUMN notify_closing_days INTEGER NOT NULL DEFAULT 3');
+  if (!userColumns.includes('notify_due_days')) db.exec('ALTER TABLE users ADD COLUMN notify_due_days INTEGER NOT NULL DEFAULT 3');
   db.exec("UPDATE users SET role = 'admin' WHERE lower(email) = lower('glaucosl@gmail.com')");
   db.exec("UPDATE users SET role = 'admin' WHERE id = (SELECT id FROM users ORDER BY id LIMIT 1) AND NOT EXISTS (SELECT 1 FROM users WHERE role = 'admin')");
   return { kind: 'sqlite', prepare: (sql) => sqliteStatement(db, sql), close: () => db.close?.() };
@@ -199,6 +222,10 @@ async function initPostgres() {
       role TEXT NOT NULL DEFAULT 'user',
       account_status TEXT NOT NULL DEFAULT 'active',
       paid_until TEXT,
+      whatsapp_phone TEXT DEFAULT '',
+      notify_whatsapp_enabled INTEGER NOT NULL DEFAULT 0,
+      notify_closing_days INTEGER NOT NULL DEFAULT 3,
+      notify_due_days INTEGER NOT NULL DEFAULT 3,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
     CREATE TABLE IF NOT EXISTS sessions (
@@ -249,6 +276,20 @@ async function initPostgres() {
       closing_day INTEGER DEFAULT 1,
       due_day INTEGER DEFAULT 10,
       active INTEGER DEFAULT 1
+    );
+    CREATE TABLE IF NOT EXISTS card_reminder_logs (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      card_id INTEGER NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+      reminder_type TEXT NOT NULL CHECK(reminder_type IN ('closing','due')),
+      reminder_date TEXT NOT NULL,
+      target_date TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'sent',
+      channel TEXT NOT NULL DEFAULT 'whatsapp',
+      message TEXT DEFAULT '',
+      provider_response TEXT DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(user_id, card_id, reminder_type, reminder_date, target_date)
     );
     CREATE TABLE IF NOT EXISTS invoices (
       id SERIAL PRIMARY KEY,
@@ -309,6 +350,7 @@ async function initPostgres() {
     CREATE INDEX IF NOT EXISTS idx_transactions_user_date ON transactions(user_id, date);
     CREATE INDEX IF NOT EXISTS idx_transactions_user_group ON transactions(user_id, installment_group);
     CREATE INDEX IF NOT EXISTS idx_transactions_user_invoice ON transactions(user_id, invoice_id);
+    CREATE INDEX IF NOT EXISTS idx_card_reminder_logs_user_date ON card_reminder_logs(user_id, reminder_date);
     CREATE INDEX IF NOT EXISTS idx_investment_assets_user ON investment_assets(user_id, asset_type, ticker);
     CREATE INDEX IF NOT EXISTS idx_investment_movements_user_date ON investment_movements(user_id, date);
     CREATE INDEX IF NOT EXISTS idx_investment_movements_asset ON investment_movements(asset_id, date);
@@ -316,6 +358,10 @@ async function initPostgres() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'user';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS account_status TEXT NOT NULL DEFAULT 'active';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS paid_until TEXT;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS whatsapp_phone TEXT DEFAULT '';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_whatsapp_enabled INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_closing_days INTEGER NOT NULL DEFAULT 3;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_due_days INTEGER NOT NULL DEFAULT 3;
     UPDATE users SET role = 'admin' WHERE lower(email) = lower('glaucosl@gmail.com');
     UPDATE users SET role = 'admin'
       WHERE id = (SELECT id FROM users ORDER BY id LIMIT 1)
@@ -337,10 +383,11 @@ export async function initDatabase({ dataDir }) {
       pg: "INSERT INTO users (email, password_hash, email_verified, account_status) VALUES ($1, $2, 0, 'pending_payment') RETURNING id"
     }),
     getUserByEmail: prepare('SELECT * FROM users WHERE email = ?'),
-    getUserById: prepare('SELECT id, email, email_verified, role, account_status, paid_until, created_at FROM users WHERE id = ?'),
+    getUserById: prepare('SELECT id, email, email_verified, role, account_status, paid_until, whatsapp_phone, notify_whatsapp_enabled, notify_closing_days, notify_due_days, created_at FROM users WHERE id = ?'),
     getPrivateUserById: prepare('SELECT * FROM users WHERE id = ?'),
     verifyUserEmail: prepare('UPDATE users SET email_verified = 1 WHERE id = ?'),
     updatePassword: prepare('UPDATE users SET password_hash = ? WHERE id = ?'),
+    updateNotificationSettings: prepare('UPDATE users SET whatsapp_phone = ?, notify_whatsapp_enabled = ?, notify_closing_days = ?, notify_due_days = ? WHERE id = ?'),
     createSession: prepare('INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)'),
     getSession: prepare({
       sqlite: 'SELECT * FROM sessions WHERE token = ? AND expires_at > CURRENT_TIMESTAMP',
@@ -353,7 +400,7 @@ export async function initDatabase({ dataDir }) {
       pg: 'SELECT * FROM email_verifications WHERE token = $1 AND used_at IS NULL AND expires_at::timestamptz > CURRENT_TIMESTAMP'
     }),
     useVerification: prepare('UPDATE email_verifications SET used_at = CURRENT_TIMESTAMP WHERE token = ?'),
-    listAdminUsers: prepare('SELECT id, email, email_verified, role, account_status, paid_until, created_at FROM users ORDER BY created_at DESC, id DESC'),
+    listAdminUsers: prepare('SELECT id, email, email_verified, role, account_status, paid_until, whatsapp_phone, notify_whatsapp_enabled, notify_closing_days, notify_due_days, created_at FROM users ORDER BY created_at DESC, id DESC'),
     updateUserAccess: prepare('UPDATE users SET account_status = ?, paid_until = ?, role = ? WHERE id = ?'),
     addLicenseEvent: prepare('INSERT INTO license_events (user_id, admin_user_id, action, notes) VALUES (?, ?, ?, ?)'),
     listSalesOrders: prepare('SELECT * FROM sales_orders ORDER BY created_at DESC, id DESC LIMIT 100'),
@@ -398,6 +445,38 @@ export async function initDatabase({ dataDir }) {
     }),
     updateCard: prepare('UPDATE cards SET name=?, brand=?, limit_amount=?, closing_day=?, due_day=?, active=? WHERE id=? AND user_id=?'),
     deleteCard: prepare('DELETE FROM cards WHERE id=? AND user_id=?'),
+    listCardReminderTargets: prepare(`
+      SELECT
+        u.id AS user_id,
+        u.email,
+        u.whatsapp_phone,
+        u.notify_closing_days,
+        u.notify_due_days,
+        u.paid_until,
+        c.id AS card_id,
+        c.name AS card_name,
+        c.brand,
+        c.closing_day,
+        c.due_day
+      FROM users u
+      JOIN cards c ON c.user_id = u.id
+      WHERE u.notify_whatsapp_enabled = 1
+        AND COALESCE(u.whatsapp_phone, '') <> ''
+        AND u.account_status = 'active'
+        AND c.active = 1
+      ORDER BY u.id, c.name
+    `),
+    getCardReminderLog: prepare(`SELECT * FROM card_reminder_logs WHERE user_id = ? AND card_id = ? AND reminder_type = ? AND reminder_date = ? AND target_date = ?`),
+    upsertCardReminderLog: prepare(`
+      INSERT INTO card_reminder_logs
+        (user_id, card_id, reminder_type, reminder_date, target_date, status, channel, message, provider_response)
+      VALUES (?, ?, ?, ?, ?, ?, 'whatsapp', ?, ?)
+      ON CONFLICT(user_id, card_id, reminder_type, reminder_date, target_date) DO UPDATE SET
+        status = excluded.status,
+        message = excluded.message,
+        provider_response = excluded.provider_response,
+        created_at = CURRENT_TIMESTAMP
+    `),
     listTransactions: prepare('SELECT t.*, c.name AS card_name FROM transactions t LEFT JOIN cards c ON c.id=t.card_id AND c.user_id=t.user_id WHERE t.user_id=? ORDER BY t.date DESC, t.id DESC'),
     getTransaction: prepare('SELECT * FROM transactions WHERE id = ? AND user_id = ?'),
     insertTransaction: prepare({

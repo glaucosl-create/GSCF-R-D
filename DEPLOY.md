@@ -41,11 +41,40 @@ SMTP_PASS=senha
 SMTP_FROM=usuario@dominio.com
 RESEND_API_KEY=re_xxxxxxxxx
 RESEND_FROM=CF-RD <onboarding@resend.dev>
+APP_TIMEZONE=America/Fortaleza
+REMINDER_CRON_SECRET=troque-este-segredo-do-agendador
+WHATSAPP_API_VERSION=v20.0
+WHATSAPP_PHONE_NUMBER_ID=000000000000000
+WHATSAPP_TOKEN=EAAG...
+WHATSAPP_TEMPLATE_NAME=nome_do_template_aprovado
+WHATSAPP_TEMPLATE_LANGUAGE=pt_BR
 ```
 
 As variaveis SMTP podem ficar vazias enquanto voce estiver apenas testando o deploy, mas o cadastro por email real so envia link quando SMTP estiver configurado.
 
 Se o plano gratuito bloquear SMTP, use `RESEND_API_KEY` e `RESEND_FROM` para envio por API HTTPS.
+
+## 2.1 Avisos de cartao por WhatsApp
+
+O usuario configura telefone, dias antes do fechamento e dias antes do vencimento na tela **Conta**. O servidor calcula os avisos diariamente e evita duplicidade pelo historico `card_reminder_logs`.
+
+Para envio real, configure a API do WhatsApp Cloud no Render:
+
+```text
+WHATSAPP_PHONE_NUMBER_ID=...
+WHATSAPP_TOKEN=...
+WHATSAPP_TEMPLATE_NAME=...
+WHATSAPP_TEMPLATE_LANGUAGE=pt_BR
+```
+
+Para avisos proativos fora da janela de conversa do WhatsApp, use um template aprovado na Meta. O template esperado pelo app recebe quatro variaveis no corpo: nome do cartao, evento, data e prazo.
+
+Em hospedagem gratuita, use tambem um agendador externo chamando uma vez por dia:
+
+```text
+POST https://seu-app.onrender.com/api/notifications/run
+Header: x-cf-cron-secret: valor_de_REMINDER_CRON_SECRET
+```
 
 ## 3. Migrar os dados locais
 

@@ -106,6 +106,57 @@ async function sendVerificationEmail(email, link) {
   return true;
 }
 
+async function sendWhatsAppMessage(phone, message, templateData = {}) {
+  const token = process.env.WHATSAPP_TOKEN;
+  const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+  if (!token || !phoneNumberId) {
+    return { sent: false, status: 'skipped', details: 'WHATSAPP_TOKEN ou WHATSAPP_PHONE_NUMBER_ID nao configurado.' };
+  }
+
+  const apiVersion = process.env.WHATSAPP_API_VERSION || 'v20.0';
+  const templateName = process.env.WHATSAPP_TEMPLATE_NAME;
+  const endpoint = `https://graph.facebook.com/${apiVersion}/${phoneNumberId}/messages`;
+  const body = templateName
+    ? {
+        messaging_product: 'whatsapp',
+        to: phone,
+        type: 'template',
+        template: {
+          name: templateName,
+          language: { code: process.env.WHATSAPP_TEMPLATE_LANGUAGE || 'pt_BR' },
+          components: [{
+            type: 'body',
+            parameters: [
+              { type: 'text', text: templateData.cardName || '' },
+              { type: 'text', text: templateData.eventLabel || '' },
+              { type: 'text', text: templateData.targetDate || '' },
+              { type: 'text', text: templateData.daysText || '' }
+            ]
+          }]
+        }
+      }
+    : {
+        messaging_product: 'whatsapp',
+        to: phone,
+        type: 'text',
+        text: { preview_url: false, body: message }
+      };
+
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${token}`,
+      'content-type': 'application/json'
+    },
+    body: JSON.stringify(body)
+  });
+  const details = await response.text().catch(() => '');
+  if (!response.ok) {
+    return { sent: false, status: 'failed', details: `${response.status} ${details.slice(0, 300)}` };
+  }
+  return { sent: true, status: 'sent', details: details.slice(0, 300) };
+}
+
 function parseCookies(req) {
   return Object.fromEntries((req.headers.cookie || '').split(';').filter(Boolean).map(part => {
     const [key, ...value] = part.trim().split('=');
@@ -222,6 +273,69 @@ async function ensureDefaultCategories(userId) {
 function toNumber(value, fallback = 0) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function normalizePhone(value) {
+  const digits = String(value || '').replace(/\D/g, '');
+  if (!digits) return '';
+  if (digits.length === 10 || digits.length === 11) return `55${digits}`;
+  return digits;
+}
+
+function sanitizeNotificationSettings(input) {
+  return {
+    whatsapp_phone: normalizePhone(input.whatsapp_phone),
+    notify_whatsapp_enabled: input.notify_whatsapp_enabled ? 1 : 0,
+    notify_closing_days: Math.max(0, Math.min(30, Number(input.notify_closing_days ?? 3))),
+    notify_due_days: Math.max(0, Math.min(30, Number(input.notify_due_days ?? 3)))
+  };
+}
+
+function localToday() {
+  const timeZone = process.env.APP_TIMEZONE || 'America/Fortaleza';
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' })
+    .formatToParts(new Date())
+    .reduce((acc, part) => ({ ...acc, [part.type]: part.value }), {});
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+function parseDateParts(dateText) {
+  const [year, month, day] = String(dateText).split('-').map(Number);
+  return { year, month, day };
+}
+
+function dateUtc(dateText) {
+  const { year, month, day } = parseDateParts(dateText);
+  return Date.UTC(year, month - 1, day);
+}
+
+function daysBetween(startDate, endDate) {
+  return Math.round((dateUtc(endDate) - dateUtc(startDate)) / 86400000);
+}
+
+function dateForDay(year, month, day) {
+  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const date = new Date(Date.UTC(year, month - 1, Math.min(Math.max(1, day), lastDay)));
+  return date.toISOString().slice(0, 10);
+}
+
+function nextMonthlyDate(day, todayText) {
+  const { year, month } = parseDateParts(todayText);
+  const currentMonthDate = dateForDay(year, month, day);
+  if (currentMonthDate >= todayText) return currentMonthDate;
+  const next = new Date(Date.UTC(year, month, 1));
+  return dateForDay(next.getUTCFullYear(), next.getUTCMonth() + 1, day);
+}
+
+function dateBR(dateText) {
+  const { year, month, day } = parseDateParts(dateText);
+  return `${String(day).padStart(2, '0')}/${String(month).padStart(2, '0')}/${year}`;
+}
+
+function daysText(days) {
+  if (days === 0) return 'hoje';
+  if (days === 1) return 'amanha';
+  return `em ${days} dias`;
 }
 
 function monthAdd(dateText, index) {
@@ -622,6 +736,75 @@ async function dashboard(userId, selectedMonth = null) {
     months,
     forecast
   };
+}
+
+function buildCardReminder(row, type, targetDate, days) {
+  const eventLabel = type === 'closing' ? 'fechamento da fatura' : 'vencimento da fatura';
+  const action = type === 'closing' ? 'fecha' : 'vence';
+  const text = daysText(days);
+  const message = [
+    `CF-R&D: lembrete do cartao ${row.card_name}.`,
+    `A fatura ${action} ${text}, em ${dateBR(targetDate)}.`,
+    type === 'closing'
+      ? 'Confira os lancamentos antes do fechamento.'
+      : 'Programe o pagamento para evitar juros e multa.'
+  ].join(' ');
+  return {
+    message,
+    templateData: {
+      cardName: row.card_name,
+      eventLabel,
+      targetDate: dateBR(targetDate),
+      daysText: text
+    }
+  };
+}
+
+async function processCardReminder(row, type, targetDate, todayText) {
+  const days = daysBetween(todayText, targetDate);
+  const existing = await statements.getCardReminderLog.get(row.user_id, row.card_id, type, todayText, targetDate);
+  if (existing?.status === 'sent') return { status: 'already_sent' };
+
+  const { message, templateData } = buildCardReminder(row, type, targetDate, days);
+  let sendResult;
+  try {
+    sendResult = await sendWhatsAppMessage(row.whatsapp_phone, message, templateData);
+  } catch (error) {
+    sendResult = { sent: false, status: 'failed', details: error.message };
+  }
+  await statements.upsertCardReminderLog.run(
+    row.user_id,
+    row.card_id,
+    type,
+    todayText,
+    targetDate,
+    sendResult.status,
+    message,
+    sendResult.details || ''
+  );
+  return { status: sendResult.status };
+}
+
+async function runCardReminders(todayText = localToday()) {
+  const rows = await statements.listCardReminderTargets.all();
+  const summary = { date: todayText, checked: 0, sent: 0, skipped: 0, failed: 0, already_sent: 0 };
+  for (const row of rows) {
+    if (row.paid_until && row.paid_until < todayText) continue;
+    const phone = normalizePhone(row.whatsapp_phone);
+    if (!phone) continue;
+    const targetRows = [
+      { type: 'closing', targetDate: nextMonthlyDate(Number(row.closing_day || 1), todayText), daysLimit: Number(row.notify_closing_days ?? 3) },
+      { type: 'due', targetDate: nextMonthlyDate(Number(row.due_day || 10), todayText), daysLimit: Number(row.notify_due_days ?? 3) }
+    ];
+    for (const reminder of targetRows) {
+      const days = daysBetween(todayText, reminder.targetDate);
+      if (days < 0 || days > reminder.daysLimit) continue;
+      summary.checked += 1;
+      const result = await processCardReminder({ ...row, whatsapp_phone: phone }, reminder.type, reminder.targetDate, todayText);
+      summary[result.status] = (summary[result.status] || 0) + 1;
+    }
+  }
+  return summary;
 }
 
 async function extractPdfText(filePath) {
@@ -1042,7 +1225,11 @@ async function handleApi(req, res, url) {
       email_verified: user.email_verified,
       role: user.role,
       account_status: user.account_status,
-      paid_until: user.paid_until
+      paid_until: user.paid_until,
+      whatsapp_phone: user.whatsapp_phone,
+      notify_whatsapp_enabled: user.notify_whatsapp_enabled,
+      notify_closing_days: user.notify_closing_days,
+      notify_due_days: user.notify_due_days
     });
   }
 
@@ -1063,10 +1250,42 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, { ok: true });
   }
 
+  if (route(req.method, pathname, 'POST', '/api/notifications/run')) {
+    const secret = process.env.REMINDER_CRON_SECRET;
+    if (!secret) return sendJson(res, 503, { error: 'Agendador de avisos nao configurado.' });
+    if (req.headers['x-cf-cron-secret'] !== secret) return sendJson(res, 401, { error: 'Agendador nao autorizado.' });
+    return sendJson(res, 200, await runCardReminders(url.searchParams.get('date') || localToday()));
+  }
+
   const user = await requireUser(req, res);
   if (!user) return;
 
   if (route(req.method, pathname, 'GET', '/api/me')) return sendJson(res, 200, user);
+  if (route(req.method, pathname, 'PUT', '/api/me/notifications')) {
+    const settings = sanitizeNotificationSettings(await readJson(req));
+    await statements.updateNotificationSettings.run(
+      settings.whatsapp_phone,
+      settings.notify_whatsapp_enabled,
+      settings.notify_closing_days,
+      settings.notify_due_days,
+      user.id
+    );
+    return sendJson(res, 200, { ok: true, user: await statements.getUserById.get(user.id) });
+  }
+  if (route(req.method, pathname, 'POST', '/api/me/notifications/test')) {
+    const current = await statements.getUserById.get(user.id);
+    const phone = normalizePhone(current.whatsapp_phone);
+    if (!phone) return sendJson(res, 400, { error: 'Cadastre seu telefone com DDD antes de testar.' });
+    const message = 'CF-R&D: teste de aviso do sistema. Se voce recebeu esta mensagem, os lembretes de cartao poderao ser enviados pelo WhatsApp.';
+    const result = await sendWhatsAppMessage(phone, message, {
+      cardName: 'Teste',
+      eventLabel: 'teste de aviso',
+      targetDate: dateBR(localToday()),
+      daysText: 'hoje'
+    });
+    if (!result.sent) return sendJson(res, result.status === 'skipped' ? 503 : 502, { error: result.details || 'Nao foi possivel enviar o teste.', status: result.status });
+    return sendJson(res, 200, { ok: true });
+  }
   if (route(req.method, pathname, 'POST', '/api/me/password')) {
     const body = await readJson(req);
     const privateUser = await statements.getPrivateUserById.get(user.id);
@@ -1308,3 +1527,25 @@ const port = Number(process.env.PORT || 3060);
 server.listen(port, () => {
   console.log(`Controle financeiro rodando em http://localhost:${port}`);
 });
+
+let lastReminderRunDate = '';
+let reminderJobRunning = false;
+
+async function runDailyReminderJob() {
+  if (process.env.REMINDER_AUTO_RUN === 'false' || reminderJobRunning) return;
+  const todayText = localToday();
+  if (lastReminderRunDate === todayText) return;
+  reminderJobRunning = true;
+  try {
+    const result = await runCardReminders(todayText);
+    lastReminderRunDate = todayText;
+    if (result.checked) console.log(`Avisos de cartao processados: ${JSON.stringify(result)}`);
+  } catch (error) {
+    console.error(`Falha ao processar avisos de cartao: ${error.message}`);
+  } finally {
+    reminderJobRunning = false;
+  }
+}
+
+setTimeout(runDailyReminderJob, 15000);
+setInterval(runDailyReminderJob, 60 * 60 * 1000);
