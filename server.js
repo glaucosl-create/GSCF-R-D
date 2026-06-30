@@ -771,6 +771,11 @@ async function dashboard(userId, selectedMonth = null) {
   const startMonth = activeMonth < thisMonth ? activeMonth : thisMonth;
   const endMonth = lastMonth > activeMonth ? lastMonth : activeMonth;
   const months = buildMonthRange(startMonth, endMonth, monthRows);
+  const activityMonths = months.filter(row =>
+    Number(row.income || 0) !== 0
+    || Number(row.expense || 0) !== 0
+    || Number(row.forecast_card || 0) !== 0
+  );
   const forecast = Object.values(monthRows)
     .filter(row => row.month >= thisMonth && row.forecast_card > 0)
     .sort((a, b) => a.month.localeCompare(b.month))
@@ -784,6 +789,7 @@ async function dashboard(userId, selectedMonth = null) {
     balanceMonth: incomeMonth - expenseMonth,
     categories: Object.entries(categories).map(([name, amount]) => ({ name, amount })).sort((a, b) => b.amount - a.amount),
     months,
+    activityMonths,
     forecast
   };
 }

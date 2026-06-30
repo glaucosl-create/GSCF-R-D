@@ -301,7 +301,12 @@ function renderDashboard(data) {
   $('balanceMetric').textContent = money(data.balanceMonth);
   renderBars('categoryBars', data.categories, 'name', 'amount');
   renderBars('forecastBars', data.forecast.map(row => ({ ...row, month: formatMonth(row.month) })), 'month', 'forecast_card', true);
-  renderMonthBars(data.months);
+  const activityMonths = data.activityMonths || data.months.filter(row =>
+    Number(row.income || 0) !== 0
+    || Number(row.expense || 0) !== 0
+    || Number(row.forecast_card || 0) !== 0
+  );
+  renderMonthBars(activityMonths);
 }
 
 function labelInvestmentType(type) {
