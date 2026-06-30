@@ -572,11 +572,16 @@ function renderNotificationSettings() {
   if (!$('notificationForm') || !state.user) return;
   $('whatsappPhone').value = state.user.whatsapp_phone || '';
   $('notifyWhatsappEnabled').checked = Boolean(Number(state.user.notify_whatsapp_enabled || 0));
+  $('notifySmsEnabled').checked = Boolean(Number(state.user.notify_sms_enabled || 0));
   $('notifyClosingDays').value = Number(state.user.notify_closing_days ?? 3);
   $('notifyDueDays').value = Number(state.user.notify_due_days ?? 3);
+  const channels = [
+    Number(state.user.notify_whatsapp_enabled || 0) ? 'WhatsApp' : null,
+    Number(state.user.notify_sms_enabled || 0) ? 'SMS' : null
+  ].filter(Boolean).join(' e ');
   $('notificationStatus').textContent = state.user.whatsapp_phone
-    ? 'Avisos configurados para o telefone cadastrado. O envio real depende da API de WhatsApp estar configurada no servidor.'
-    : 'Cadastre o telefone para receber avisos dos seus cartoes.';
+    ? `Telefone cadastrado${channels ? ` para ${channels}` : ''}. Envios desativados ate configuracao do provedor.`
+    : 'Cadastre o telefone e escolha os canais. Os envios estao desativados ate configuracao do provedor.';
 }
 
 function renderAdmin() {
@@ -1070,6 +1075,7 @@ $('notificationForm').addEventListener('submit', async (event) => {
       body: JSON.stringify({
         whatsapp_phone: $('whatsappPhone').value,
         notify_whatsapp_enabled: $('notifyWhatsappEnabled').checked,
+        notify_sms_enabled: $('notifySmsEnabled').checked,
         notify_closing_days: Number($('notifyClosingDays').value || 0),
         notify_due_days: Number($('notifyDueDays').value || 0)
       })
@@ -1087,8 +1093,24 @@ $('testWhatsappBtn').addEventListener('click', async () => {
     button.disabled = true;
     button.textContent = 'Enviando...';
     try {
-      await api('/api/me/notifications/test', { method: 'POST' });
+      await api('/api/me/notifications/test', { method: 'POST', body: JSON.stringify({ channel: 'whatsapp' }) });
       toast('Teste enviado pelo WhatsApp.');
+    } finally {
+      button.disabled = false;
+      button.textContent = originalText;
+    }
+  });
+});
+
+$('testSmsBtn').addEventListener('click', async () => {
+  await runAction(async () => {
+    const button = $('testSmsBtn');
+    const originalText = button.textContent;
+    button.disabled = true;
+    button.textContent = 'Enviando...';
+    try {
+      await api('/api/me/notifications/test', { method: 'POST', body: JSON.stringify({ channel: 'sms' }) });
+      toast('Teste enviado por SMS.');
     } finally {
       button.disabled = false;
       button.textContent = originalText;

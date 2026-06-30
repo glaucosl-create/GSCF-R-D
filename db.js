@@ -62,6 +62,7 @@ async function initSqlite(dataDir) {
       paid_until TEXT,
       whatsapp_phone TEXT DEFAULT '',
       notify_whatsapp_enabled INTEGER NOT NULL DEFAULT 0,
+      notify_sms_enabled INTEGER NOT NULL DEFAULT 0,
       notify_closing_days INTEGER NOT NULL DEFAULT 3,
       notify_due_days INTEGER NOT NULL DEFAULT 3,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -201,6 +202,7 @@ async function initSqlite(dataDir) {
   if (!userColumns.includes('paid_until')) db.exec('ALTER TABLE users ADD COLUMN paid_until TEXT');
   if (!userColumns.includes('whatsapp_phone')) db.exec("ALTER TABLE users ADD COLUMN whatsapp_phone TEXT DEFAULT ''");
   if (!userColumns.includes('notify_whatsapp_enabled')) db.exec('ALTER TABLE users ADD COLUMN notify_whatsapp_enabled INTEGER NOT NULL DEFAULT 0');
+  if (!userColumns.includes('notify_sms_enabled')) db.exec('ALTER TABLE users ADD COLUMN notify_sms_enabled INTEGER NOT NULL DEFAULT 0');
   if (!userColumns.includes('notify_closing_days')) db.exec('ALTER TABLE users ADD COLUMN notify_closing_days INTEGER NOT NULL DEFAULT 3');
   if (!userColumns.includes('notify_due_days')) db.exec('ALTER TABLE users ADD COLUMN notify_due_days INTEGER NOT NULL DEFAULT 3');
   db.exec("UPDATE users SET role = 'admin' WHERE lower(email) = lower('glaucosl@gmail.com')");
@@ -224,6 +226,7 @@ async function initPostgres() {
       paid_until TEXT,
       whatsapp_phone TEXT DEFAULT '',
       notify_whatsapp_enabled INTEGER NOT NULL DEFAULT 0,
+      notify_sms_enabled INTEGER NOT NULL DEFAULT 0,
       notify_closing_days INTEGER NOT NULL DEFAULT 3,
       notify_due_days INTEGER NOT NULL DEFAULT 3,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -360,6 +363,7 @@ async function initPostgres() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS paid_until TEXT;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS whatsapp_phone TEXT DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_whatsapp_enabled INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_sms_enabled INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_closing_days INTEGER NOT NULL DEFAULT 3;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_due_days INTEGER NOT NULL DEFAULT 3;
     UPDATE users SET role = 'admin' WHERE lower(email) = lower('glaucosl@gmail.com');
@@ -383,11 +387,11 @@ export async function initDatabase({ dataDir }) {
       pg: "INSERT INTO users (email, password_hash, email_verified, account_status) VALUES ($1, $2, 0, 'pending_payment') RETURNING id"
     }),
     getUserByEmail: prepare('SELECT * FROM users WHERE email = ?'),
-    getUserById: prepare('SELECT id, email, email_verified, role, account_status, paid_until, whatsapp_phone, notify_whatsapp_enabled, notify_closing_days, notify_due_days, created_at FROM users WHERE id = ?'),
+    getUserById: prepare('SELECT id, email, email_verified, role, account_status, paid_until, whatsapp_phone, notify_whatsapp_enabled, notify_sms_enabled, notify_closing_days, notify_due_days, created_at FROM users WHERE id = ?'),
     getPrivateUserById: prepare('SELECT * FROM users WHERE id = ?'),
     verifyUserEmail: prepare('UPDATE users SET email_verified = 1 WHERE id = ?'),
     updatePassword: prepare('UPDATE users SET password_hash = ? WHERE id = ?'),
-    updateNotificationSettings: prepare('UPDATE users SET whatsapp_phone = ?, notify_whatsapp_enabled = ?, notify_closing_days = ?, notify_due_days = ? WHERE id = ?'),
+    updateNotificationSettings: prepare('UPDATE users SET whatsapp_phone = ?, notify_whatsapp_enabled = ?, notify_sms_enabled = ?, notify_closing_days = ?, notify_due_days = ? WHERE id = ?'),
     createSession: prepare('INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)'),
     getSession: prepare({
       sqlite: 'SELECT * FROM sessions WHERE token = ? AND expires_at > CURRENT_TIMESTAMP',
@@ -400,7 +404,7 @@ export async function initDatabase({ dataDir }) {
       pg: 'SELECT * FROM email_verifications WHERE token = $1 AND used_at IS NULL AND expires_at::timestamptz > CURRENT_TIMESTAMP'
     }),
     useVerification: prepare('UPDATE email_verifications SET used_at = CURRENT_TIMESTAMP WHERE token = ?'),
-    listAdminUsers: prepare('SELECT id, email, email_verified, role, account_status, paid_until, whatsapp_phone, notify_whatsapp_enabled, notify_closing_days, notify_due_days, created_at FROM users ORDER BY created_at DESC, id DESC'),
+    listAdminUsers: prepare('SELECT id, email, email_verified, role, account_status, paid_until, whatsapp_phone, notify_whatsapp_enabled, notify_sms_enabled, notify_closing_days, notify_due_days, created_at FROM users ORDER BY created_at DESC, id DESC'),
     updateUserAccess: prepare('UPDATE users SET account_status = ?, paid_until = ?, role = ? WHERE id = ?'),
     addLicenseEvent: prepare('INSERT INTO license_events (user_id, admin_user_id, action, notes) VALUES (?, ?, ?, ?)'),
     listSalesOrders: prepare('SELECT * FROM sales_orders ORDER BY created_at DESC, id DESC LIMIT 100'),
@@ -450,6 +454,8 @@ export async function initDatabase({ dataDir }) {
         u.id AS user_id,
         u.email,
         u.whatsapp_phone,
+        u.notify_whatsapp_enabled,
+        u.notify_sms_enabled,
         u.notify_closing_days,
         u.notify_due_days,
         u.paid_until,
@@ -460,7 +466,7 @@ export async function initDatabase({ dataDir }) {
         c.due_day
       FROM users u
       JOIN cards c ON c.user_id = u.id
-      WHERE u.notify_whatsapp_enabled = 1
+      WHERE (u.notify_whatsapp_enabled = 1 OR u.notify_sms_enabled = 1)
         AND COALESCE(u.whatsapp_phone, '') <> ''
         AND u.account_status = 'active'
         AND c.active = 1
@@ -470,7 +476,7 @@ export async function initDatabase({ dataDir }) {
     upsertCardReminderLog: prepare(`
       INSERT INTO card_reminder_logs
         (user_id, card_id, reminder_type, reminder_date, target_date, status, channel, message, provider_response)
-      VALUES (?, ?, ?, ?, ?, ?, 'whatsapp', ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(user_id, card_id, reminder_type, reminder_date, target_date) DO UPDATE SET
         status = excluded.status,
         message = excluded.message,

@@ -43,20 +43,30 @@ RESEND_API_KEY=re_xxxxxxxxx
 RESEND_FROM=CF-RD <onboarding@resend.dev>
 APP_TIMEZONE=America/Fortaleza
 REMINDER_CRON_SECRET=troque-este-segredo-do-agendador
+REMINDER_AUTO_RUN=false
+NOTIFICATION_DELIVERY_ENABLED=false
 WHATSAPP_API_VERSION=v20.0
 WHATSAPP_PHONE_NUMBER_ID=000000000000000
 WHATSAPP_TOKEN=EAAG...
 WHATSAPP_TEMPLATE_NAME=nome_do_template_aprovado
 WHATSAPP_TEMPLATE_LANGUAGE=pt_BR
+SMS_PROVIDER=
+TWILIO_ACCOUNT_SID=
+TWILIO_AUTH_TOKEN=
+TWILIO_FROM=
+ZENVIA_TOKEN=
+ZENVIA_FROM=CF-RD
 ```
 
 As variaveis SMTP podem ficar vazias enquanto voce estiver apenas testando o deploy, mas o cadastro por email real so envia link quando SMTP estiver configurado.
 
 Se o plano gratuito bloquear SMTP, use `RESEND_API_KEY` e `RESEND_FROM` para envio por API HTTPS.
 
-## 2.1 Avisos de cartao por WhatsApp
+## 2.1 Avisos de cartao por WhatsApp ou SMS
 
-O usuario configura telefone, dias antes do fechamento e dias antes do vencimento na tela **Conta**. O servidor calcula os avisos diariamente e evita duplicidade pelo historico `card_reminder_logs`.
+O usuario configura telefone, canais, dias antes do fechamento e dias antes do vencimento na tela **Conta**. Por padrao, o cadastro fica pronto, mas o envio real fica desligado por `NOTIFICATION_DELIVERY_ENABLED=false` e `REMINDER_AUTO_RUN=false`.
+
+Quando decidir ativar, configure `NOTIFICATION_DELIVERY_ENABLED=true` e escolha os provedores desejados.
 
 Para envio real, configure a API do WhatsApp Cloud no Render:
 
@@ -74,6 +84,23 @@ Em hospedagem gratuita, use tambem um agendador externo chamando uma vez por dia
 ```text
 POST https://seu-app.onrender.com/api/notifications/run
 Header: x-cf-cron-secret: valor_de_REMINDER_CRON_SECRET
+```
+
+Para SMS, selecione um provedor:
+
+```text
+SMS_PROVIDER=twilio
+TWILIO_ACCOUNT_SID=...
+TWILIO_AUTH_TOKEN=...
+TWILIO_FROM=...
+```
+
+ou:
+
+```text
+SMS_PROVIDER=zenvia
+ZENVIA_TOKEN=...
+ZENVIA_FROM=CF-RD
 ```
 
 ## 3. Migrar os dados locais

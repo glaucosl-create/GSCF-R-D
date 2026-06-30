@@ -107,6 +107,9 @@ async function sendVerificationEmail(email, link) {
 }
 
 async function sendWhatsAppMessage(phone, message, templateData = {}) {
+  if (process.env.NOTIFICATION_DELIVERY_ENABLED !== 'true') {
+    return { sent: false, status: 'skipped', details: 'Envio de notificacoes desativado no servidor.' };
+  }
   const token = process.env.WHATSAPP_TOKEN;
   const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
   if (!token || !phoneNumberId) {
@@ -155,6 +158,52 @@ async function sendWhatsAppMessage(phone, message, templateData = {}) {
     return { sent: false, status: 'failed', details: `${response.status} ${details.slice(0, 300)}` };
   }
   return { sent: true, status: 'sent', details: details.slice(0, 300) };
+}
+
+async function sendSmsMessage(phone, message) {
+  if (process.env.NOTIFICATION_DELIVERY_ENABLED !== 'true') {
+    return { sent: false, status: 'skipped', details: 'Envio de notificacoes desativado no servidor.' };
+  }
+  const provider = String(process.env.SMS_PROVIDER || '').toLowerCase();
+  if (provider === 'twilio') {
+    const sid = process.env.TWILIO_ACCOUNT_SID;
+    const token = process.env.TWILIO_AUTH_TOKEN;
+    const from = process.env.TWILIO_FROM;
+    if (!sid || !token || !from) return { sent: false, status: 'skipped', details: 'Twilio nao configurado.' };
+    const body = new URLSearchParams({ To: `+${phone}`, From: from, Body: message });
+    const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
+      method: 'POST',
+      headers: {
+        authorization: `Basic ${Buffer.from(`${sid}:${token}`).toString('base64')}`,
+        'content-type': 'application/x-www-form-urlencoded'
+      },
+      body
+    });
+    const details = await response.text().catch(() => '');
+    if (!response.ok) return { sent: false, status: 'failed', details: `${response.status} ${details.slice(0, 300)}` };
+    return { sent: true, status: 'sent', details: details.slice(0, 300) };
+  }
+  if (provider === 'zenvia') {
+    const token = process.env.ZENVIA_TOKEN;
+    const from = process.env.ZENVIA_FROM || 'CF-RD';
+    if (!token) return { sent: false, status: 'skipped', details: 'Zenvia nao configurado.' };
+    const response = await fetch('https://api.zenvia.com/v2/channels/sms/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-token': token,
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify({
+        from,
+        to: phone,
+        contents: [{ type: 'text', text: message }]
+      })
+    });
+    const details = await response.text().catch(() => '');
+    if (!response.ok) return { sent: false, status: 'failed', details: `${response.status} ${details.slice(0, 300)}` };
+    return { sent: true, status: 'sent', details: details.slice(0, 300) };
+  }
+  return { sent: false, status: 'skipped', details: 'Provedor SMS nao selecionado.' };
 }
 
 function parseCookies(req) {
@@ -286,6 +335,7 @@ function sanitizeNotificationSettings(input) {
   return {
     whatsapp_phone: normalizePhone(input.whatsapp_phone),
     notify_whatsapp_enabled: input.notify_whatsapp_enabled ? 1 : 0,
+    notify_sms_enabled: input.notify_sms_enabled ? 1 : 0,
     notify_closing_days: Math.max(0, Math.min(30, Number(input.notify_closing_days ?? 3))),
     notify_due_days: Math.max(0, Math.min(30, Number(input.notify_due_days ?? 3)))
   };
@@ -738,17 +788,19 @@ async function dashboard(userId, selectedMonth = null) {
   };
 }
 
-function buildCardReminder(row, type, targetDate, days) {
+function buildCardReminder(row, type, targetDate, days, channel = 'whatsapp') {
   const eventLabel = type === 'closing' ? 'fechamento da fatura' : 'vencimento da fatura';
   const action = type === 'closing' ? 'fecha' : 'vence';
   const text = daysText(days);
-  const message = [
-    `CF-R&D: lembrete do cartao ${row.card_name}.`,
-    `A fatura ${action} ${text}, em ${dateBR(targetDate)}.`,
-    type === 'closing'
-      ? 'Confira os lancamentos antes do fechamento.'
-      : 'Programe o pagamento para evitar juros e multa.'
-  ].join(' ');
+  const message = channel === 'sms'
+    ? `CF-RD: Cartao ${row.card_name} ${action} ${text}, em ${dateBR(targetDate)}. ${type === 'closing' ? 'Confira os lancamentos.' : 'Programe o pagamento.'}`
+    : [
+        `CF-R&D: lembrete do cartao ${row.card_name}.`,
+        `A fatura ${action} ${text}, em ${dateBR(targetDate)}.`,
+        type === 'closing'
+          ? 'Confira os lancamentos antes do fechamento.'
+          : 'Programe o pagamento para evitar juros e multa.'
+      ].join(' ');
   return {
     message,
     templateData: {
@@ -760,15 +812,17 @@ function buildCardReminder(row, type, targetDate, days) {
   };
 }
 
-async function processCardReminder(row, type, targetDate, todayText) {
+async function processCardReminder(row, type, targetDate, todayText, channel = 'whatsapp') {
   const days = daysBetween(todayText, targetDate);
   const existing = await statements.getCardReminderLog.get(row.user_id, row.card_id, type, todayText, targetDate);
   if (existing?.status === 'sent') return { status: 'already_sent' };
 
-  const { message, templateData } = buildCardReminder(row, type, targetDate, days);
+  const { message, templateData } = buildCardReminder(row, type, targetDate, days, channel);
   let sendResult;
   try {
-    sendResult = await sendWhatsAppMessage(row.whatsapp_phone, message, templateData);
+    sendResult = channel === 'sms'
+      ? await sendSmsMessage(row.whatsapp_phone, message)
+      : await sendWhatsAppMessage(row.whatsapp_phone, message, templateData);
   } catch (error) {
     sendResult = { sent: false, status: 'failed', details: error.message };
   }
@@ -779,6 +833,7 @@ async function processCardReminder(row, type, targetDate, todayText) {
     todayText,
     targetDate,
     sendResult.status,
+    channel,
     message,
     sendResult.details || ''
   );
@@ -799,9 +854,15 @@ async function runCardReminders(todayText = localToday()) {
     for (const reminder of targetRows) {
       const days = daysBetween(todayText, reminder.targetDate);
       if (days < 0 || days > reminder.daysLimit) continue;
-      summary.checked += 1;
-      const result = await processCardReminder({ ...row, whatsapp_phone: phone }, reminder.type, reminder.targetDate, todayText);
-      summary[result.status] = (summary[result.status] || 0) + 1;
+      const channels = [
+        Number(row.notify_whatsapp_enabled || 0) ? 'whatsapp' : null,
+        Number(row.notify_sms_enabled || 0) ? 'sms' : null
+      ].filter(Boolean);
+      for (const channel of channels) {
+        summary.checked += 1;
+        const result = await processCardReminder({ ...row, whatsapp_phone: phone }, reminder.type, reminder.targetDate, todayText, channel);
+        summary[result.status] = (summary[result.status] || 0) + 1;
+      }
     }
   }
   return summary;
@@ -1228,6 +1289,7 @@ async function handleApi(req, res, url) {
       paid_until: user.paid_until,
       whatsapp_phone: user.whatsapp_phone,
       notify_whatsapp_enabled: user.notify_whatsapp_enabled,
+      notify_sms_enabled: user.notify_sms_enabled,
       notify_closing_days: user.notify_closing_days,
       notify_due_days: user.notify_due_days
     });
@@ -1266,6 +1328,7 @@ async function handleApi(req, res, url) {
     await statements.updateNotificationSettings.run(
       settings.whatsapp_phone,
       settings.notify_whatsapp_enabled,
+      settings.notify_sms_enabled,
       settings.notify_closing_days,
       settings.notify_due_days,
       user.id
@@ -1273,11 +1336,15 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, { ok: true, user: await statements.getUserById.get(user.id) });
   }
   if (route(req.method, pathname, 'POST', '/api/me/notifications/test')) {
+    const body = await readJson(req);
+    const channel = body.channel === 'sms' ? 'sms' : 'whatsapp';
     const current = await statements.getUserById.get(user.id);
     const phone = normalizePhone(current.whatsapp_phone);
     if (!phone) return sendJson(res, 400, { error: 'Cadastre seu telefone com DDD antes de testar.' });
-    const message = 'CF-R&D: teste de aviso do sistema. Se voce recebeu esta mensagem, os lembretes de cartao poderao ser enviados pelo WhatsApp.';
-    const result = await sendWhatsAppMessage(phone, message, {
+    const message = channel === 'sms'
+      ? 'CF-RD: teste de aviso do sistema.'
+      : 'CF-R&D: teste de aviso do sistema. Se voce recebeu esta mensagem, os lembretes de cartao poderao ser enviados pelo WhatsApp.';
+    const result = channel === 'sms' ? await sendSmsMessage(phone, message) : await sendWhatsAppMessage(phone, message, {
       cardName: 'Teste',
       eventLabel: 'teste de aviso',
       targetDate: dateBR(localToday()),
@@ -1532,7 +1599,7 @@ let lastReminderRunDate = '';
 let reminderJobRunning = false;
 
 async function runDailyReminderJob() {
-  if (process.env.REMINDER_AUTO_RUN === 'false' || reminderJobRunning) return;
+  if (process.env.REMINDER_AUTO_RUN !== 'true' || reminderJobRunning) return;
   const todayText = localToday();
   if (lastReminderRunDate === todayText) return;
   reminderJobRunning = true;
