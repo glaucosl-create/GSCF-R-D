@@ -562,6 +562,7 @@ function renderInvoices() {
         <p>${invoice.month} | ${escapeHtml(invoice.card_name || 'Sem cartao')} | Total detectado ${money(invoice.total_amount)}</p>
       </div>
       <div class="actions">
+        <button class="secondary" data-reparse-invoice="${invoice.id}">Reler PDF</button>
         <button class="danger" data-del-invoice="${invoice.id}">Excluir</button>
       </div>
     </article>
@@ -905,6 +906,18 @@ document.addEventListener('click', async (event) => {
     });
   }
 
+  const invoiceReparse = event.target.dataset.reparseInvoice;
+  if (invoiceReparse) {
+    await runAction(async () => {
+      const draft = await api(`/api/invoices/${invoiceReparse}/reparse`, { method: 'POST' });
+      state.invoiceDraft = draft;
+      renderInvoiceDraft();
+      document.querySelector('[data-view="invoices"]').click();
+      $('invoiceReview').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      toast(`${draft.rows.length} itens detectados ao reler o PDF.`);
+    });
+  }
+
   const invoiceDelete = event.target.dataset.delInvoice;
   if (invoiceDelete && confirm('Excluir esta fatura? Os lancamentos importados dela e as parcelas futuras previstas tambem serao excluidos.')) {
     await runAction(async () => {
@@ -1197,6 +1210,7 @@ $('invoiceRows').addEventListener('change', updateInvoiceDraftField);
 
 $('importInvoiceBtn').addEventListener('click', async () => {
   if (!state.invoiceDraft) return;
+  if (state.invoiceDraft.replace_existing && !confirm('Substituir os lancamentos ja importados desta fatura pelos itens revisados?')) return;
   setInvoiceImportProcessing(true);
   try {
     await runAction(async () => {

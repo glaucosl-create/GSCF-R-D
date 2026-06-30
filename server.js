@@ -968,7 +968,8 @@ function isInvoiceStopLine(line) {
 function extractInvoiceDatePrefix(line, fallbackMonth) {
   const numeric = line.match(/^(\d{1,2})\s*[\/.-]\s*(\d{1,2})(?:\s*[\/.-]\s*(\d{2,4}))?\s*(.*)$/i);
   const named = line.match(/^(\d{1,2})\s+([a-zA-Z\u00C0-\u00FF]{3,9})\.?(?:\s+(\d{2,4}))?\s*(.*)$/i);
-  const match = numeric || named;
+  const compact = line.match(/^(\d{2})(\d{2})\s+(.+)$/i);
+  const match = numeric || named || (compact ? [compact[0], compact[1], compact[2], undefined, compact[3]] : null);
   if (!match) return null;
 
   const [, day, monthRaw, yearRaw, rest = ''] = match;
@@ -1511,6 +1512,25 @@ async function handleApi(req, res, url) {
     if (storedPath && storedPath.startsWith(uploadDir) && storedPath !== uploadDir && existsSync(storedPath)) unlinkSync(storedPath);
     return sendJson(res, 200, { ok: true, deleted_transactions: txDirect + txProjected });
   }
+  if (pathname.startsWith('/api/invoices/') && pathname.endsWith('/reparse') && req.method === 'POST') {
+    const id = Number(pathname.split('/')[3]);
+    const invoice = await statements.getInvoice.get(id, user.id);
+    if (!invoice) return sendJson(res, 404, { error: 'Fatura nao encontrada.' });
+    const storedPath = invoice.stored_name ? resolve(join(uploadDir, invoice.stored_name)) : '';
+    if (!storedPath || !storedPath.startsWith(uploadDir) || storedPath === uploadDir || !existsSync(storedPath)) {
+      return sendJson(res, 404, { error: 'Arquivo PDF da fatura nao encontrado no servidor. Envie o PDF novamente.' });
+    }
+    const text = await extractPdfText(storedPath);
+    const parsed = parseInvoiceText(text, invoice.month);
+    return sendJson(res, 200, {
+      invoice_id: id,
+      card_id: invoice.card_id,
+      total: parsed.total,
+      rows: parsed.rows,
+      extracted_text: text.slice(0, 20000),
+      replace_existing: true
+    });
+  }
   if (route(req.method, pathname, 'POST', '/api/invoices/upload')) {
     const { fields, files } = await parseMultipart(req);
     const file = files.pdf;
@@ -1548,7 +1568,11 @@ async function handleApi(req, res, url) {
     const invoice = await statements.getInvoice.get(invoiceId, user.id);
     if (!invoice) throw new HttpError(404, 'Fatura nao encontrada.');
     const alreadyImported = await statements.countInvoiceTransactions.get(user.id, invoiceId);
-    if (Number(alreadyImported?.count || 0) > 0) throw new HttpError(409, 'Esta fatura ja foi importada.');
+    if (Number(alreadyImported?.count || 0) > 0) {
+      if (!body.replace_existing) throw new HttpError(409, 'Esta fatura ja foi importada.');
+      await statements.deleteInvoiceProjectedTransactions.run(user.id, user.id, invoiceId);
+      await statements.deleteInvoiceTransactions.run(user.id, invoiceId);
+    }
     const rows = Array.isArray(body.rows) ? body.rows : [];
     let created = 0;
     let updated = 0;
