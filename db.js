@@ -139,11 +139,40 @@ async function initSqlite(dataDir) {
       notes TEXT DEFAULT '',
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+    CREATE TABLE IF NOT EXISTS investment_assets (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      ticker TEXT NOT NULL,
+      name TEXT NOT NULL,
+      asset_type TEXT NOT NULL DEFAULT 'outros',
+      institution TEXT DEFAULT '',
+      current_price REAL DEFAULT 0,
+      target_percent REAL DEFAULT 0,
+      notes TEXT DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(user_id, ticker)
+    );
+    CREATE TABLE IF NOT EXISTS investment_movements (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      asset_id INTEGER NOT NULL REFERENCES investment_assets(id) ON DELETE CASCADE,
+      date TEXT NOT NULL,
+      kind TEXT NOT NULL CHECK(kind IN ('buy','sell','dividend','interest','fee')),
+      quantity REAL DEFAULT 0,
+      unit_price REAL DEFAULT 0,
+      amount REAL NOT NULL DEFAULT 0,
+      fees REAL DEFAULT 0,
+      notes TEXT DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
     CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
     CREATE INDEX IF NOT EXISTS idx_invoices_user_month ON invoices(user_id, month);
     CREATE INDEX IF NOT EXISTS idx_transactions_user_date ON transactions(user_id, date);
     CREATE INDEX IF NOT EXISTS idx_transactions_user_group ON transactions(user_id, installment_group);
     CREATE INDEX IF NOT EXISTS idx_transactions_user_invoice ON transactions(user_id, invoice_id);
+    CREATE INDEX IF NOT EXISTS idx_investment_assets_user ON investment_assets(user_id, asset_type, ticker);
+    CREATE INDEX IF NOT EXISTS idx_investment_movements_user_date ON investment_movements(user_id, date);
+    CREATE INDEX IF NOT EXISTS idx_investment_movements_asset ON investment_movements(asset_id, date);
   `);
 
   const userColumns = db.prepare('PRAGMA table_info(users)').all().map(column => column.name);
@@ -249,11 +278,40 @@ async function initPostgres() {
       notes TEXT DEFAULT '',
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+    CREATE TABLE IF NOT EXISTS investment_assets (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      ticker TEXT NOT NULL,
+      name TEXT NOT NULL,
+      asset_type TEXT NOT NULL DEFAULT 'outros',
+      institution TEXT DEFAULT '',
+      current_price REAL DEFAULT 0,
+      target_percent REAL DEFAULT 0,
+      notes TEXT DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(user_id, ticker)
+    );
+    CREATE TABLE IF NOT EXISTS investment_movements (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      asset_id INTEGER NOT NULL REFERENCES investment_assets(id) ON DELETE CASCADE,
+      date TEXT NOT NULL,
+      kind TEXT NOT NULL CHECK(kind IN ('buy','sell','dividend','interest','fee')),
+      quantity REAL DEFAULT 0,
+      unit_price REAL DEFAULT 0,
+      amount REAL NOT NULL DEFAULT 0,
+      fees REAL DEFAULT 0,
+      notes TEXT DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
     CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
     CREATE INDEX IF NOT EXISTS idx_invoices_user_month ON invoices(user_id, month);
     CREATE INDEX IF NOT EXISTS idx_transactions_user_date ON transactions(user_id, date);
     CREATE INDEX IF NOT EXISTS idx_transactions_user_group ON transactions(user_id, installment_group);
     CREATE INDEX IF NOT EXISTS idx_transactions_user_invoice ON transactions(user_id, invoice_id);
+    CREATE INDEX IF NOT EXISTS idx_investment_assets_user ON investment_assets(user_id, asset_type, ticker);
+    CREATE INDEX IF NOT EXISTS idx_investment_movements_user_date ON investment_movements(user_id, date);
+    CREATE INDEX IF NOT EXISTS idx_investment_movements_asset ON investment_movements(asset_id, date);
     ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified INTEGER NOT NULL DEFAULT 1;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'user';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS account_status TEXT NOT NULL DEFAULT 'active';
@@ -351,6 +409,36 @@ export async function initDatabase({ dataDir }) {
     }),
     updateTransaction: prepare(`UPDATE transactions SET type=?, date=?, description=?, category=?, amount=?, payment_method=?, card_id=?, invoice_id=?, installment_group=?, installment_index=?, installment_total=?, notes=? WHERE id=? AND user_id=?`),
     deleteTransaction: prepare('DELETE FROM transactions WHERE id=? AND user_id=?'),
+    listInvestmentAssets: prepare('SELECT * FROM investment_assets WHERE user_id = ? ORDER BY asset_type, ticker'),
+    getInvestmentAsset: prepare('SELECT * FROM investment_assets WHERE id = ? AND user_id = ?'),
+    insertInvestmentAsset: prepare({
+      sqlite: `INSERT INTO investment_assets
+        (user_id, ticker, name, asset_type, institution, current_price, target_percent, notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      pg: `INSERT INTO investment_assets
+        (user_id, ticker, name, asset_type, institution, current_price, target_percent, notes)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`
+    }),
+    updateInvestmentAsset: prepare(`UPDATE investment_assets SET ticker=?, name=?, asset_type=?, institution=?, current_price=?, target_percent=?, notes=? WHERE id=? AND user_id=?`),
+    deleteInvestmentAsset: prepare('DELETE FROM investment_assets WHERE id=? AND user_id=?'),
+    listInvestmentMovements: prepare(`
+      SELECT m.*, a.ticker, a.name AS asset_name, a.asset_type
+      FROM investment_movements m
+      JOIN investment_assets a ON a.id = m.asset_id AND a.user_id = m.user_id
+      WHERE m.user_id = ?
+      ORDER BY m.date DESC, m.id DESC
+    `),
+    getInvestmentMovement: prepare('SELECT * FROM investment_movements WHERE id = ? AND user_id = ?'),
+    insertInvestmentMovement: prepare({
+      sqlite: `INSERT INTO investment_movements
+        (user_id, asset_id, date, kind, quantity, unit_price, amount, fees, notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      pg: `INSERT INTO investment_movements
+        (user_id, asset_id, date, kind, quantity, unit_price, amount, fees, notes)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`
+    }),
+    updateInvestmentMovement: prepare(`UPDATE investment_movements SET asset_id=?, date=?, kind=?, quantity=?, unit_price=?, amount=?, fees=?, notes=? WHERE id=? AND user_id=?`),
+    deleteInvestmentMovement: prepare('DELETE FROM investment_movements WHERE id=? AND user_id=?'),
     findProjectedInstallment: prepare({
       sqlite: `
         SELECT *

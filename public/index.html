@@ -35,6 +35,7 @@
       <nav>
         <button class="nav active" data-view="dashboard">Dashboard</button>
         <button class="nav" data-view="transactions">Lancamentos</button>
+        <button class="nav" data-view="investments">Investimentos</button>
         <button class="nav" data-view="categories">Categorias</button>
         <button class="nav" data-view="cards">Cartoes</button>
         <button class="nav" data-view="invoices">Faturas PDF</button>
@@ -87,6 +88,99 @@
         <section>
           <h3>Receitas x despesas por mes</h3>
           <div id="monthBars" class="bars wide"></div>
+        </section>
+      </section>
+
+      <section id="investments" class="view">
+        <div class="metrics">
+          <article><span>Valor atual</span><strong id="investmentValueMetric">R$ 0,00</strong></article>
+          <article><span>Custo aplicado</span><strong id="investmentCostMetric">R$ 0,00</strong></article>
+          <article><span>Resultado total</span><strong id="investmentResultMetric">R$ 0,00</strong></article>
+          <article><span>Proventos</span><strong id="investmentEarningsMetric">R$ 0,00</strong></article>
+        </div>
+
+        <section id="investmentAssetEditStatus" class="edit-status hidden">
+          <div>
+            <h3>Editando ativo</h3>
+            <p id="investmentAssetEditText">Atualize o cadastro e o preco atual para recalcular o painel.</p>
+          </div>
+          <button type="button" id="cancelInvestmentAssetEditBtn" class="secondary">Cancelar edicao</button>
+        </section>
+        <form id="investmentAssetForm" class="form-grid">
+          <input type="hidden" id="investmentAssetId">
+          <input id="investmentTicker" placeholder="Codigo do ativo" required>
+          <input id="investmentName" placeholder="Nome do ativo" required>
+          <select id="investmentType">
+            <option value="renda_fixa">Renda fixa</option>
+            <option value="acoes">Acoes</option>
+            <option value="fiis">FIIs</option>
+            <option value="fundos">Fundos</option>
+            <option value="tesouro">Tesouro</option>
+            <option value="crypto">Cripto</option>
+            <option value="previdencia">Previdencia</option>
+            <option value="outros">Outros</option>
+          </select>
+          <input id="investmentInstitution" placeholder="Corretora/banco">
+          <input id="investmentCurrentPrice" type="number" step="0.0001" min="0" placeholder="Preco atual">
+          <input id="investmentTargetPercent" type="number" step="0.01" min="0" max="100" placeholder="% alvo">
+          <input id="investmentNotes" placeholder="Observacoes">
+          <button type="submit" id="saveInvestmentAssetBtn">Salvar ativo</button>
+          <button type="button" id="clearInvestmentAssetBtn" class="secondary">Limpar</button>
+        </form>
+
+        <section id="investmentMovementEditStatus" class="edit-status hidden">
+          <div>
+            <h3>Editando movimentacao</h3>
+            <p>Revise compra, venda, provento ou taxa e salve novamente.</p>
+          </div>
+          <button type="button" id="cancelInvestmentMovementEditBtn" class="secondary">Cancelar edicao</button>
+        </section>
+        <form id="investmentMovementForm" class="form-grid">
+          <input type="hidden" id="investmentMovementId">
+          <select id="investmentMovementAsset" required></select>
+          <input id="investmentMovementDate" type="date" required>
+          <select id="investmentMovementKind">
+            <option value="buy">Compra</option>
+            <option value="sell">Venda</option>
+            <option value="dividend">Dividendo</option>
+            <option value="interest">Rendimento</option>
+            <option value="fee">Taxa</option>
+          </select>
+          <input id="investmentQuantity" type="number" step="0.00000001" min="0" placeholder="Quantidade">
+          <input id="investmentUnitPrice" type="number" step="0.0001" min="0" placeholder="Preco unitario">
+          <input id="investmentAmount" type="number" step="0.01" min="0" placeholder="Valor total">
+          <input id="investmentFees" type="number" step="0.01" min="0" placeholder="Taxas">
+          <input id="investmentMovementNotes" placeholder="Observacoes">
+          <button type="submit" id="saveInvestmentMovementBtn">Salvar movimento</button>
+          <button type="button" id="clearInvestmentMovementBtn" class="secondary">Limpar</button>
+        </form>
+
+        <div class="grid two">
+          <section>
+            <h3>Alocacao por classe</h3>
+            <div id="investmentAllocationBars" class="bars"></div>
+          </section>
+          <section>
+            <h3>Resumo da carteira</h3>
+            <div id="investmentSummaryList" class="cards-list"></div>
+          </section>
+        </div>
+
+        <section>
+          <h3>Ativos</h3>
+          <div id="investmentAssetsList" class="cards-list"></div>
+        </section>
+
+        <section>
+          <h3>Movimentacoes</h3>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Data</th><th>Ativo</th><th>Tipo</th><th>Quantidade</th><th>Valor</th><th></th></tr>
+              </thead>
+              <tbody id="investmentMovementsTable"></tbody>
+            </table>
+          </div>
         </section>
       </section>
 

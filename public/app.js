@@ -4,6 +4,7 @@ const state = {
   transactions: [],
   categories: [],
   invoices: [],
+  investments: { assets: [], movements: [], positions: [], allocation: [], summary: {} },
   adminUsers: [],
   salesOrders: [],
   invoiceDraft: null
@@ -145,8 +146,10 @@ function showApp() {
 async function boot() {
   applyTheme(localStorage.getItem(THEME_KEY) || 'light');
   $('txDate').value = today();
+  $('investmentMovementDate').value = today();
   $('invoiceMonth').value = currentMonth();
   updateTransactionInstallmentHint();
+  updateInvestmentAmountHint();
   if (!sessionStorage.getItem(APP_SESSION_KEY)) {
     await fetch('/api/auth/logout', { method: 'POST', cache: 'no-store', keepalive: true }).catch(() => {});
     showAuth();
@@ -174,24 +177,28 @@ async function logout(message = 'Sessao encerrada.') {
 }
 
 async function refreshAll() {
-  const [cards, transactions, categories, invoices, dashboard] = await Promise.all([
+  const [cards, transactions, categories, invoices, dashboard, investments] = await Promise.all([
     api('/api/cards'),
     api('/api/transactions'),
     api('/api/categories'),
     api('/api/invoices'),
-    api(`/api/dashboard?month=${encodeURIComponent(selectedDashboardMonth)}`)
+    api(`/api/dashboard?month=${encodeURIComponent(selectedDashboardMonth)}`),
+    api('/api/investments')
   ]);
   state.cards = cards;
   state.transactions = transactions;
   state.categories = categories;
   state.invoices = invoices;
+  state.investments = investments;
   renderCardOptions();
+  renderInvestmentOptions();
   renderCategories();
   renderCategoryManager();
   renderTransactions();
   renderCards();
   renderInvoices();
   renderDashboard(dashboard);
+  renderInvestments();
   if (state.user?.role === 'admin') await refreshAdmin();
   updateLastRefresh();
 }
@@ -230,6 +237,13 @@ function renderCardOptions() {
   $('invoiceCard').innerHTML = state.cards.length
     ? state.cards.map(card => `<option value="${card.id}">${escapeHtml(card.name)}</option>`).join('')
     : '<option value="">Cadastre um cartao</option>';
+}
+
+function renderInvestmentOptions() {
+  const assets = state.investments?.assets || [];
+  $('investmentMovementAsset').innerHTML = assets.length
+    ? assets.map(asset => `<option value="${asset.id}">${escapeHtml(asset.ticker)} - ${escapeHtml(asset.name)}</option>`).join('')
+    : '<option value="">Cadastre um ativo</option>';
 }
 
 function renderCategories(selectedValue = $('txCategory')?.value || '') {
@@ -287,6 +301,76 @@ function renderDashboard(data) {
   renderBars('categoryBars', data.categories, 'name', 'amount');
   renderBars('forecastBars', data.forecast.map(row => ({ ...row, month: formatMonth(row.month) })), 'month', 'forecast_card', true);
   renderMonthBars(data.months);
+}
+
+function labelInvestmentType(type) {
+  return ({
+    renda_fixa: 'Renda fixa',
+    acoes: 'Acoes',
+    fiis: 'FIIs',
+    fundos: 'Fundos',
+    tesouro: 'Tesouro',
+    crypto: 'Cripto',
+    previdencia: 'Previdencia',
+    outros: 'Outros'
+  })[type] || type;
+}
+
+function labelInvestmentKind(kind) {
+  return ({ buy: 'Compra', sell: 'Venda', dividend: 'Dividendo', interest: 'Rendimento', fee: 'Taxa' })[kind] || kind;
+}
+
+function numberBR(value, digits = 4) {
+  return Number(value || 0).toLocaleString('pt-BR', { maximumFractionDigits: digits });
+}
+
+function renderInvestments() {
+  const data = state.investments || { assets: [], movements: [], positions: [], allocation: [], summary: {} };
+  const summary = data.summary || {};
+  $('investmentValueMetric').textContent = money(summary.current_value);
+  $('investmentCostMetric').textContent = money(summary.cost);
+  $('investmentResultMetric').textContent = money(summary.total_result);
+  $('investmentEarningsMetric').textContent = money(summary.earnings);
+  renderBars('investmentAllocationBars', (data.allocation || []).map(row => ({
+    name: `${labelInvestmentType(row.name)} (${row.percent || 0}%)`,
+    amount: row.amount
+  })), 'name', 'amount');
+
+  $('investmentSummaryList').innerHTML = `
+    <article class="card compact-card"><div><strong>Resultado nao realizado</strong><p>${money(summary.unrealized_result)}</p></div></article>
+    <article class="card compact-card"><div><strong>Resultado realizado</strong><p>${money(summary.realized_result)}</p></div></article>
+    <article class="card compact-card"><div><strong>Taxas registradas</strong><p>${money(summary.fees_total)}</p></div></article>
+  `;
+
+  const positions = data.positions || [];
+  $('investmentAssetsList').innerHTML = positions.length ? positions.map(asset => `
+    <article class="card">
+      <div>
+        <strong>${escapeHtml(asset.ticker)} - ${escapeHtml(asset.name)}</strong>
+        <p>${labelInvestmentType(asset.asset_type)} | ${escapeHtml(asset.institution || 'Sem instituicao')} | Qtd ${numberBR(asset.quantity)} | PM ${money(asset.average_price)} | Atual ${money(asset.current_price)}</p>
+        <p>Valor ${money(asset.current_value)} | Custo ${money(asset.cost)} | Resultado ${money(asset.total_result)} | Proventos ${money(asset.earnings)}</p>
+      </div>
+      <div class="actions">
+        <button class="secondary" data-edit-investment-asset="${asset.id}">Editar</button>
+        <button class="danger" data-del-investment-asset="${asset.id}">Excluir</button>
+      </div>
+    </article>
+  `).join('') : '<p class="empty">Nenhum ativo cadastrado.</p>';
+
+  const movements = data.movements || [];
+  $('investmentMovementsTable').innerHTML = movements.length ? movements.map(movement => `
+    <tr>
+      <td>${movement.date}</td>
+      <td>${escapeHtml(movement.ticker)} - ${escapeHtml(movement.asset_name)}</td>
+      <td>${labelInvestmentKind(movement.kind)}</td>
+      <td>${numberBR(movement.quantity)}</td>
+      <td>${money(movement.amount)}${movement.fees ? ` | taxas ${money(movement.fees)}` : ''}</td>
+      <td>
+        <button class="secondary" data-edit-investment-movement="${movement.id}">Editar</button>
+        <button class="danger" data-del-investment-movement="${movement.id}">Excluir</button>
+      </td>
+    </tr>
+  `).join('') : '<tr><td colspan="6">Nenhuma movimentacao cadastrada.</td></tr>';
 }
 
 function renderDashboardMonthOptions(months, selectedMonth) {
@@ -605,6 +689,79 @@ function clearCategoryForm() {
   $('categoryType').value = 'expense';
 }
 
+function readInvestmentAssetForm() {
+  return {
+    ticker: $('investmentTicker').value,
+    name: $('investmentName').value,
+    asset_type: $('investmentType').value,
+    institution: $('investmentInstitution').value,
+    current_price: Number($('investmentCurrentPrice').value || 0),
+    target_percent: Number($('investmentTargetPercent').value || 0),
+    notes: $('investmentNotes').value
+  };
+}
+
+function clearInvestmentAssetForm() {
+  $('investmentAssetId').value = '';
+  $('investmentAssetForm').reset();
+  $('investmentType').value = 'renda_fixa';
+  $('saveInvestmentAssetBtn').textContent = 'Salvar ativo';
+  $('investmentAssetEditStatus').classList.add('hidden');
+}
+
+function setInvestmentAssetEditing(asset) {
+  $('investmentAssetEditStatus').classList.remove('hidden');
+  $('investmentAssetEditText').textContent = `${asset.ticker} - ${asset.name}`;
+  $('saveInvestmentAssetBtn').textContent = 'Salvar alteracoes';
+  $('investmentAssetForm').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  setTimeout(() => $('investmentTicker').focus(), 250);
+}
+
+function readInvestmentMovementForm() {
+  const amountValue = $('investmentAmount').value;
+  return {
+    asset_id: Number($('investmentMovementAsset').value),
+    date: $('investmentMovementDate').value,
+    kind: $('investmentMovementKind').value,
+    quantity: Number($('investmentQuantity').value || 0),
+    unit_price: Number($('investmentUnitPrice').value || 0),
+    amount: amountValue === '' ? '' : Number(amountValue),
+    fees: Number($('investmentFees').value || 0),
+    notes: $('investmentMovementNotes').value
+  };
+}
+
+function clearInvestmentMovementForm() {
+  $('investmentMovementId').value = '';
+  $('investmentMovementForm').reset();
+  $('investmentMovementDate').value = today();
+  $('investmentMovementKind').value = 'buy';
+  updateInvestmentAmountHint();
+  renderInvestmentOptions();
+  $('saveInvestmentMovementBtn').textContent = 'Salvar movimento';
+  $('investmentMovementEditStatus').classList.add('hidden');
+}
+
+function setInvestmentMovementEditing(movement) {
+  $('investmentMovementEditStatus').classList.remove('hidden');
+  $('saveInvestmentMovementBtn').textContent = 'Salvar alteracoes';
+  updateInvestmentAmountHint();
+  $('investmentMovementForm').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  setTimeout(() => $('investmentMovementDate').focus(), 250);
+}
+
+function updateInvestmentAmountHint() {
+  const kind = $('investmentMovementKind')?.value || 'buy';
+  const quantity = Number($('investmentQuantity')?.value || 0);
+  const unitPrice = Number($('investmentUnitPrice')?.value || 0);
+  const amount = $('investmentAmount');
+  if (!amount) return;
+  if (kind === 'dividend') amount.placeholder = 'Valor do dividendo';
+  else if (kind === 'interest') amount.placeholder = 'Valor do rendimento';
+  else if (kind === 'fee') amount.placeholder = 'Valor da taxa';
+  else amount.placeholder = quantity && unitPrice ? `Valor total (${money(quantity * unitPrice)})` : 'Valor total';
+}
+
 document.addEventListener('click', async (event) => {
   const nav = event.target.closest('.nav');
   if (nav) {
@@ -679,6 +836,58 @@ document.addEventListener('click', async (event) => {
     });
   }
 
+  const investmentAssetEdit = event.target.dataset.editInvestmentAsset;
+  if (investmentAssetEdit) {
+    const asset = (state.investments?.assets || []).find(item => item.id === Number(investmentAssetEdit));
+    if (!asset) return;
+    $('investmentAssetId').value = asset.id;
+    $('investmentTicker').value = asset.ticker;
+    $('investmentName').value = asset.name;
+    $('investmentType').value = asset.asset_type;
+    $('investmentInstitution').value = asset.institution || '';
+    $('investmentCurrentPrice').value = asset.current_price || 0;
+    $('investmentTargetPercent').value = asset.target_percent || 0;
+    $('investmentNotes').value = asset.notes || '';
+    setInvestmentAssetEditing(asset);
+  }
+
+  const investmentAssetDelete = event.target.dataset.delInvestmentAsset;
+  if (investmentAssetDelete && confirm('Excluir este ativo? As movimentacoes dele tambem serao excluidas.')) {
+    await runAction(async () => {
+      await api(`/api/investments/assets/${investmentAssetDelete}`, { method: 'DELETE' });
+      clearInvestmentAssetForm();
+      clearInvestmentMovementForm();
+      await refreshAll();
+      toast('Ativo excluido.');
+    });
+  }
+
+  const investmentMovementEdit = event.target.dataset.editInvestmentMovement;
+  if (investmentMovementEdit) {
+    const movement = (state.investments?.movements || []).find(item => item.id === Number(investmentMovementEdit));
+    if (!movement) return;
+    $('investmentMovementId').value = movement.id;
+    $('investmentMovementAsset').value = movement.asset_id;
+    $('investmentMovementDate').value = movement.date;
+    $('investmentMovementKind').value = movement.kind;
+    $('investmentQuantity').value = movement.quantity || 0;
+    $('investmentUnitPrice').value = movement.unit_price || 0;
+    $('investmentAmount').value = movement.amount || 0;
+    $('investmentFees').value = movement.fees || 0;
+    $('investmentMovementNotes').value = movement.notes || '';
+    setInvestmentMovementEditing(movement);
+  }
+
+  const investmentMovementDelete = event.target.dataset.delInvestmentMovement;
+  if (investmentMovementDelete && confirm('Excluir esta movimentacao?')) {
+    await runAction(async () => {
+      await api(`/api/investments/movements/${investmentMovementDelete}`, { method: 'DELETE' });
+      clearInvestmentMovementForm();
+      await refreshAll();
+      toast('Movimentacao excluida.');
+    });
+  }
+
   const invoiceDelete = event.target.dataset.delInvoice;
   if (invoiceDelete && confirm('Excluir esta fatura? Os lancamentos importados dela e as parcelas futuras previstas tambem serao excluidos.')) {
     await runAction(async () => {
@@ -747,9 +956,16 @@ $('clearTxBtn').addEventListener('click', clearTxForm);
 $('cancelTxEditBtn').addEventListener('click', clearTxForm);
 $('clearCardBtn').addEventListener('click', clearCardForm);
 $('clearCategoryBtn').addEventListener('click', clearCategoryForm);
+$('clearInvestmentAssetBtn').addEventListener('click', clearInvestmentAssetForm);
+$('cancelInvestmentAssetEditBtn').addEventListener('click', clearInvestmentAssetForm);
+$('clearInvestmentMovementBtn').addEventListener('click', clearInvestmentMovementForm);
+$('cancelInvestmentMovementEditBtn').addEventListener('click', clearInvestmentMovementForm);
 $('txType').addEventListener('change', renderCategories);
 $('txInstallments').addEventListener('input', updateTransactionInstallmentHint);
 $('txInstallments').addEventListener('change', updateTransactionInstallmentHint);
+$('investmentMovementKind').addEventListener('change', updateInvestmentAmountHint);
+$('investmentQuantity').addEventListener('input', updateInvestmentAmountHint);
+$('investmentUnitPrice').addEventListener('input', updateInvestmentAmountHint);
 $('transactionTypeFilter').addEventListener('change', () => {
   transactionPage = 1;
   selectedTransactionCategory = 'all';
@@ -831,6 +1047,32 @@ $('categoryForm').addEventListener('submit', async (event) => {
     clearCategoryForm();
     await refreshAll();
     toast('Categoria salva.');
+  });
+});
+
+$('investmentAssetForm').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  await runAction(async () => {
+    const id = $('investmentAssetId').value;
+    const body = readInvestmentAssetForm();
+    if (id) await api(`/api/investments/assets/${id}`, { method: 'PUT', body: JSON.stringify(body) });
+    else await api('/api/investments/assets', { method: 'POST', body: JSON.stringify(body) });
+    clearInvestmentAssetForm();
+    await refreshAll();
+    toast('Ativo salvo.');
+  });
+});
+
+$('investmentMovementForm').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  await runAction(async () => {
+    const id = $('investmentMovementId').value;
+    const body = readInvestmentMovementForm();
+    if (id) await api(`/api/investments/movements/${id}`, { method: 'PUT', body: JSON.stringify(body) });
+    else await api('/api/investments/movements', { method: 'POST', body: JSON.stringify(body) });
+    clearInvestmentMovementForm();
+    await refreshAll();
+    toast('Movimentacao salva.');
   });
 });
 

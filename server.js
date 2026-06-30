@@ -365,6 +365,153 @@ async function createTransactionRows(userId, input) {
   return rows.length;
 }
 
+const investmentTypes = new Set(['renda_fixa', 'acoes', 'fiis', 'fundos', 'tesouro', 'crypto', 'previdencia', 'outros']);
+const investmentKinds = new Set(['buy', 'sell', 'dividend', 'interest', 'fee']);
+
+function normalizeInvestmentAsset(input) {
+  const ticker = String(input.ticker || '').trim().toUpperCase();
+  const name = String(input.name || ticker).trim();
+  const assetType = investmentTypes.has(input.asset_type) ? input.asset_type : 'outros';
+  return {
+    ticker,
+    name,
+    asset_type: assetType,
+    institution: String(input.institution || '').trim(),
+    current_price: Math.max(0, toNumber(input.current_price)),
+    target_percent: Math.max(0, Math.min(100, toNumber(input.target_percent))),
+    notes: String(input.notes || '').trim()
+  };
+}
+
+function validateInvestmentAsset(asset) {
+  if (!asset.ticker) throw new HttpError(400, 'Informe o codigo do ativo.');
+  if (!asset.name) throw new HttpError(400, 'Informe o nome do ativo.');
+}
+
+function normalizeInvestmentMovement(input) {
+  const quantity = Math.max(0, toNumber(input.quantity));
+  const unitPrice = Math.max(0, toNumber(input.unit_price));
+  const fallbackAmount = quantity && unitPrice ? quantity * unitPrice : 0;
+  const amountWasProvided = input.amount !== undefined && input.amount !== null && String(input.amount).trim() !== '';
+  return {
+    asset_id: Number(input.asset_id),
+    date: String(input.date || new Date().toISOString().slice(0, 10)).slice(0, 10),
+    kind: investmentKinds.has(input.kind) ? input.kind : 'buy',
+    quantity,
+    unit_price: unitPrice,
+    amount: Math.max(0, amountWasProvided ? toNumber(input.amount, fallbackAmount) : fallbackAmount),
+    fees: Math.max(0, toNumber(input.fees)),
+    notes: String(input.notes || '').trim()
+  };
+}
+
+async function normalizeAndValidateInvestmentMovement(userId, input) {
+  const movement = normalizeInvestmentMovement(input);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(movement.date)) throw new HttpError(400, 'Data invalida.');
+  if (!movement.asset_id || !(await statements.getInvestmentAsset.get(movement.asset_id, userId))) {
+    throw new HttpError(400, 'Ativo invalido para este usuario.');
+  }
+  if ((movement.kind === 'buy' || movement.kind === 'sell') && (!movement.quantity || !movement.unit_price)) {
+    throw new HttpError(400, 'Informe quantidade e preco unitario.');
+  }
+  if ((movement.kind === 'dividend' || movement.kind === 'interest' || movement.kind === 'fee') && !movement.amount) {
+    throw new HttpError(400, 'Informe o valor da movimentacao.');
+  }
+  return movement;
+}
+
+function buildInvestmentSummary(assets, movements) {
+  const byAsset = new Map(assets.map(asset => [Number(asset.id), {
+    ...asset,
+    quantity: 0,
+    cost: 0,
+    realized_result: 0,
+    earnings: 0,
+    fees_total: 0,
+    current_value: 0,
+    unrealized_result: 0,
+    total_result: 0,
+    average_price: 0
+  }]));
+
+  const ordered = [...movements].sort((a, b) => String(a.date).localeCompare(String(b.date)) || Number(a.id) - Number(b.id));
+  for (const movement of ordered) {
+    const asset = byAsset.get(Number(movement.asset_id));
+    if (!asset) continue;
+    const quantity = toNumber(movement.quantity);
+    const unitPrice = toNumber(movement.unit_price);
+    const amount = toNumber(movement.amount, quantity * unitPrice);
+    const fees = toNumber(movement.fees);
+    if (movement.kind === 'buy') {
+      asset.quantity += quantity;
+      asset.cost += amount + fees;
+      asset.fees_total += fees;
+    } else if (movement.kind === 'sell') {
+      const soldQuantity = Math.min(quantity, asset.quantity);
+      const averageCost = asset.quantity > 0 ? asset.cost / asset.quantity : 0;
+      const soldCost = averageCost * soldQuantity;
+      asset.quantity -= soldQuantity;
+      asset.cost = Math.max(0, asset.cost - soldCost);
+      asset.realized_result += amount - fees - soldCost;
+      asset.fees_total += fees;
+    } else if (movement.kind === 'dividend' || movement.kind === 'interest') {
+      asset.earnings += amount;
+    } else if (movement.kind === 'fee') {
+      asset.fees_total += amount;
+      asset.realized_result -= amount;
+    }
+  }
+
+  const positions = [...byAsset.values()].map(asset => {
+    const currentPrice = toNumber(asset.current_price);
+    const currentValue = asset.quantity * currentPrice;
+    const unrealized = currentValue - asset.cost;
+    const totalResult = unrealized + asset.realized_result + asset.earnings;
+    return {
+      ...asset,
+      quantity: Number(asset.quantity.toFixed(8)),
+      cost: Number(asset.cost.toFixed(2)),
+      average_price: asset.quantity > 0 ? Number((asset.cost / asset.quantity).toFixed(4)) : 0,
+      current_value: Number(currentValue.toFixed(2)),
+      unrealized_result: Number(unrealized.toFixed(2)),
+      total_result: Number(totalResult.toFixed(2)),
+      earnings: Number(asset.earnings.toFixed(2)),
+      realized_result: Number(asset.realized_result.toFixed(2)),
+      fees_total: Number(asset.fees_total.toFixed(2))
+    };
+  });
+
+  const summary = positions.reduce((acc, asset) => {
+    acc.cost += asset.cost;
+    acc.current_value += asset.current_value;
+    acc.unrealized_result += asset.unrealized_result;
+    acc.realized_result += asset.realized_result;
+    acc.earnings += asset.earnings;
+    acc.fees_total += asset.fees_total;
+    return acc;
+  }, { cost: 0, current_value: 0, unrealized_result: 0, realized_result: 0, earnings: 0, fees_total: 0 });
+  summary.total_result = summary.unrealized_result + summary.realized_result + summary.earnings;
+  for (const key of Object.keys(summary)) summary[key] = Number(summary[key].toFixed(2));
+
+  const allocationMap = {};
+  for (const asset of positions) allocationMap[asset.asset_type] = (allocationMap[asset.asset_type] || 0) + asset.current_value;
+  const allocation = Object.entries(allocationMap)
+    .map(([name, amount]) => ({
+      name,
+      amount: Number(amount.toFixed(2)),
+      percent: summary.current_value > 0 ? Number(((amount / summary.current_value) * 100).toFixed(2)) : 0
+    }))
+    .sort((a, b) => b.amount - a.amount);
+
+  return { summary, positions: positions.sort((a, b) => b.current_value - a.current_value), allocation };
+}
+
+async function investmentsDashboard(userId) {
+  const assets = await statements.listInvestmentAssets.all(userId);
+  const movements = await statements.listInvestmentMovements.all(userId);
+  return { assets, movements, ...buildInvestmentSummary(assets, movements) };
+}
+
 async function dashboard(userId, selectedMonth = null) {
   const transactions = await statements.listTransactions.all(userId);
   const now = new Date();
@@ -923,6 +1070,50 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, { ok: true });
   }
   if (route(req.method, pathname, 'GET', '/api/dashboard')) return sendJson(res, 200, await dashboard(user.id, url.searchParams.get('month')));
+
+  if (route(req.method, pathname, 'GET', '/api/investments')) return sendJson(res, 200, await investmentsDashboard(user.id));
+  if (route(req.method, pathname, 'POST', '/api/investments/assets')) {
+    const asset = normalizeInvestmentAsset(await readJson(req));
+    validateInvestmentAsset(asset);
+    try {
+      const result = await statements.insertInvestmentAsset.run(user.id, asset.ticker, asset.name, asset.asset_type, asset.institution, asset.current_price, asset.target_percent, asset.notes);
+      return sendJson(res, 201, { id: result.lastInsertRowid });
+    } catch {
+      return sendJson(res, 409, { error: 'Ja existe um ativo com este codigo.' });
+    }
+  }
+  if (pathname.startsWith('/api/investments/assets/') && req.method === 'PUT') {
+    const id = Number(pathname.split('/').pop());
+    if (!(await statements.getInvestmentAsset.get(id, user.id))) return sendJson(res, 404, { error: 'Ativo nao encontrado.' });
+    const asset = normalizeInvestmentAsset(await readJson(req));
+    validateInvestmentAsset(asset);
+    try {
+      await statements.updateInvestmentAsset.run(asset.ticker, asset.name, asset.asset_type, asset.institution, asset.current_price, asset.target_percent, asset.notes, id, user.id);
+      return sendJson(res, 200, { ok: true });
+    } catch {
+      return sendJson(res, 409, { error: 'Ja existe um ativo com este codigo.' });
+    }
+  }
+  if (pathname.startsWith('/api/investments/assets/') && req.method === 'DELETE') {
+    await statements.deleteInvestmentAsset.run(Number(pathname.split('/').pop()), user.id);
+    return sendJson(res, 200, { ok: true });
+  }
+  if (route(req.method, pathname, 'POST', '/api/investments/movements')) {
+    const movement = await normalizeAndValidateInvestmentMovement(user.id, await readJson(req));
+    const result = await statements.insertInvestmentMovement.run(user.id, movement.asset_id, movement.date, movement.kind, movement.quantity, movement.unit_price, movement.amount, movement.fees, movement.notes);
+    return sendJson(res, 201, { id: result.lastInsertRowid });
+  }
+  if (pathname.startsWith('/api/investments/movements/') && req.method === 'PUT') {
+    const id = Number(pathname.split('/').pop());
+    if (!(await statements.getInvestmentMovement.get(id, user.id))) return sendJson(res, 404, { error: 'Movimentacao nao encontrada.' });
+    const movement = await normalizeAndValidateInvestmentMovement(user.id, await readJson(req));
+    await statements.updateInvestmentMovement.run(movement.asset_id, movement.date, movement.kind, movement.quantity, movement.unit_price, movement.amount, movement.fees, movement.notes, id, user.id);
+    return sendJson(res, 200, { ok: true });
+  }
+  if (pathname.startsWith('/api/investments/movements/') && req.method === 'DELETE') {
+    await statements.deleteInvestmentMovement.run(Number(pathname.split('/').pop()), user.id);
+    return sendJson(res, 200, { ok: true });
+  }
 
   if (route(req.method, pathname, 'GET', '/api/cards')) return sendJson(res, 200, await statements.listCards.all(user.id));
   if (route(req.method, pathname, 'POST', '/api/cards')) {
