@@ -829,7 +829,6 @@ async function dashboard(userId, selectedMonth = null) {
   const invoiceMonthRows = {};
   let incomeMonth = 0;
   let expenseMonth = 0;
-  const invoicesWithOfficialTotal = new Set();
 
   for (const invoice of invoices) {
     const total = Number(invoice.total_amount || 0);
@@ -837,13 +836,6 @@ async function dashboard(userId, selectedMonth = null) {
       invoiceMonthRows[invoice.month] ||= { month: invoice.month, income: 0, expense: 0, forecast_card: 0 };
       invoiceMonthRows[invoice.month].forecast_card += total;
     }
-    if (invoice.month !== activeMonth || total <= 0) continue;
-    const invoiceId = Number(invoice.id || 0);
-    invoicesWithOfficialTotal.add(invoiceId);
-    const cardKey = invoice.card_id || 'none';
-    cardTotals[cardKey] ||= { card_id: invoice.card_id || null, name: invoice.card_name || 'Sem cartao', amount: 0, count: 0 };
-    cardTotals[cardKey].amount += total;
-    cardTotals[cardKey].count += 1;
   }
 
   for (const tx of transactions) {
@@ -864,7 +856,7 @@ async function dashboard(userId, selectedMonth = null) {
         categories[tx.category] = (categories[tx.category] || 0) + amount;
       }
     }
-    if (tx.payment_method === 'credit_card' && cardMonth === activeMonth && !invoicesWithOfficialTotal.has(Number(tx.invoice_id || 0))) {
+    if (tx.payment_method === 'credit_card' && cardMonth === activeMonth) {
       const cardKey = tx.card_id || 'none';
       cardTotals[cardKey] ||= { card_id: tx.card_id || null, name: tx.card_name || 'Sem cartao', amount: 0, count: 0 };
       cardTotals[cardKey].amount += cardAmount;
@@ -1717,12 +1709,18 @@ async function handleApi(req, res, url) {
     const rows = Array.isArray(body.rows) ? body.rows : [];
     let created = 0;
     let updated = 0;
+    let reviewedTotal = 0;
     for (const row of rows) {
       const result = await createInvoiceRows(user.id, { ...row, invoice_id: invoiceId, card_id: body.card_id || row.card_id || invoice.card_id, payment_method: 'credit_card' });
+      reviewedTotal += (row.type === 'income' ? -1 : 1) * Math.abs(toNumber(row.amount));
       created += result.created;
       updated += result.updated;
     }
-    return sendJson(res, 201, { created, updated });
+    if (rows.length) {
+      reviewedTotal = Number(reviewedTotal.toFixed(2));
+      await statements.updateInvoiceTotal.run(reviewedTotal, invoiceId, user.id);
+    }
+    return sendJson(res, 201, { created, updated, total: reviewedTotal });
   }
 
   sendJson(res, 404, { error: 'Rota nao encontrada.' });

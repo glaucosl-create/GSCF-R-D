@@ -591,6 +591,7 @@ export async function initDatabase({ dataDir }) {
       sqlite: 'INSERT INTO invoices (user_id, card_id, month, original_name, stored_name, total_amount) VALUES (?, ?, ?, ?, ?, ?)',
       pg: 'INSERT INTO invoices (user_id, card_id, month, original_name, stored_name, total_amount) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id'
     }),
+    updateInvoiceTotal: prepare('UPDATE invoices SET total_amount = ? WHERE id = ? AND user_id = ?'),
     findInvoiceByUpload: prepare({
       sqlite: 'SELECT * FROM invoices WHERE user_id = ? AND month = ? AND original_name = ? AND (card_id = ? OR (card_id IS NULL AND ? IS NULL)) LIMIT 1',
       pg: 'SELECT * FROM invoices WHERE user_id = $1 AND month = $2 AND original_name = $3 AND (card_id = $4 OR (card_id IS NULL AND $5::integer IS NULL)) LIMIT 1'
