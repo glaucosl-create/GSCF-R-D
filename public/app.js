@@ -388,14 +388,19 @@ function renderDashboardMonthOptions(months, selectedMonth) {
 }
 
 function renderBars(target, rows, labelKey, valueKey, alt = false) {
-  const max = Math.max(1, ...rows.map(row => row[valueKey]));
-  $(target).innerHTML = rows.length ? rows.map(row => `
-    <div class="bar-row">
+  const sortedRows = [...rows].sort((a, b) => Number(b[valueKey] || 0) - Number(a[valueKey] || 0));
+  const max = Math.max(1, ...sortedRows.map(row => Number(row[valueKey] || 0)));
+  $(target).innerHTML = sortedRows.length ? sortedRows.map(row => {
+    const value = Number(row[valueKey] || 0);
+    const width = value > 0 ? Math.max(6, value / max * 100) : 0;
+    return `
+    <div class="bar-row metric-bar-row">
       <span>${escapeHtml(row[labelKey])}</span>
-      <div class="bar-track"><div class="bar-fill ${alt ? 'alt' : ''}" style="width:${Math.max(4, row[valueKey] / max * 100)}%"></div></div>
-      <strong>${money(row[valueKey])}</strong>
+      <strong>${money(value)}</strong>
+      <div class="bar-track"><div class="bar-fill ${alt ? 'alt' : ''}" style="width:${width}%"></div></div>
     </div>
-  `).join('') : '<p class="empty">Sem dados para exibir.</p>';
+  `;
+  }).join('') : '<p class="empty">Sem dados para exibir.</p>';
 }
 
 function renderMonthBars(rows) {

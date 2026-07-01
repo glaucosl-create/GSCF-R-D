@@ -341,6 +341,25 @@ nav { display: grid; gap: 8px; }
   background: linear-gradient(90deg, var(--primary), #41b8a8);
 }
 .bar-fill.alt { background: linear-gradient(90deg, var(--accent), #f0a46a); }
+.metric-bar-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px 12px;
+}
+.metric-bar-row span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.metric-bar-row strong {
+  font-size: 13px;
+  white-space: nowrap;
+}
+.metric-bar-row .bar-track {
+  grid-column: 1 / -1;
+  height: 10px;
+  background: color-mix(in srgb, var(--line) 72%, var(--surface));
+}
 
 .form-grid {
   display: grid;
