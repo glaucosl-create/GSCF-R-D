@@ -639,15 +639,40 @@ function renderInvoiceDraftSummary() {
     : '';
 }
 
+function normalizeInvoiceDraft(draft, fallbackMonth) {
+  const referenceMonth = draft?.month || fallbackMonth || currentMonth();
+  return {
+    ...draft,
+    month: referenceMonth,
+    rows: (draft?.rows || []).map(row => ({
+      ...row,
+      reference_month: row.reference_month || referenceMonth
+    }))
+  };
+}
+
 function renderInvoiceDraft() {
   const rows = state.invoiceDraft?.rows || [];
   $('invoiceReview').classList.toggle('hidden', !state.invoiceDraft);
   $('invoiceExtractPanel').classList.toggle('hidden', !state.invoiceDraft?.extracted_text);
   $('invoiceExtractText').value = state.invoiceDraft?.extracted_text || '';
   renderInvoiceDraftSummary();
-  $('invoiceRows').innerHTML = rows.map((row, index) => `
+  const header = rows.length ? `
+    <div class="review-row invoice-review-row invoice-review-header">
+      <span>Data</span>
+      <span>Mes ref.</span>
+      <span>Descricao</span>
+      <span>Categoria</span>
+      <span>Valor</span>
+      <span>Parcela</span>
+      <span>Total</span>
+      <span></span>
+    </div>
+  ` : '';
+  $('invoiceRows').innerHTML = header + rows.map((row, index) => `
     <div class="review-row invoice-review-row" data-row="${index}">
       <input type="date" value="${row.date}" data-invoice-field="date">
+      <input type="month" value="${row.reference_month || state.invoiceDraft?.month || currentMonth()}" title="Mes de referencia da fatura" data-invoice-field="reference_month">
       <input value="${escapeAttr(row.description)}" data-invoice-field="description">
       <select data-invoice-field="category">${expenseCategoryOptions(row.category)}</select>
       <input type="number" step="0.01" min="0" value="${row.amount}" data-invoice-field="amount">
@@ -929,7 +954,7 @@ document.addEventListener('click', async (event) => {
   if (invoiceReparse) {
     await runAction(async () => {
       const draft = await api(`/api/invoices/${invoiceReparse}/reparse`, { method: 'POST' });
-      state.invoiceDraft = draft;
+      state.invoiceDraft = normalizeInvoiceDraft(draft, draft.month);
       renderInvoiceDraft();
       document.querySelector('[data-view="invoices"]').click();
       $('invoiceReview').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -1206,7 +1231,7 @@ $('invoiceForm').addEventListener('submit', async (event) => {
       form.append('month', $('invoiceMonth').value);
       form.append('pdf', $('invoicePdf').files[0]);
       const draft = await api('/api/invoices/upload', { method: 'POST', body: form });
-      state.invoiceDraft = { ...draft, card_id: $('invoiceCard').value };
+      state.invoiceDraft = normalizeInvoiceDraft({ ...draft, card_id: $('invoiceCard').value }, $('invoiceMonth').value);
       renderInvoiceDraft();
       await refreshAll();
       toast(`${draft.rows.length} itens detectados no PDF.`);

@@ -498,7 +498,14 @@ td:last-child { text-align: right; white-space: nowrap; }
   gap: 8px;
 }
 .invoice-review-row {
-  grid-template-columns: 140px 1.4fr 1fr 120px 86px 86px 46px;
+  grid-template-columns: 140px 132px 1.4fr 1fr 120px 86px 86px 46px;
+}
+.invoice-review-header {
+  align-items: center;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
 }
 .extract-panel {
   margin-top: 12px;

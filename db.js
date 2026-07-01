@@ -152,6 +152,7 @@ async function initSqlite(dataDir) {
       payment_method TEXT NOT NULL DEFAULT 'cash',
       card_id INTEGER REFERENCES cards(id) ON DELETE SET NULL,
       invoice_id INTEGER REFERENCES invoices(id) ON DELETE SET NULL,
+      reference_month TEXT,
       installment_group TEXT,
       installment_index INTEGER DEFAULT 1,
       installment_total INTEGER DEFAULT 1,
@@ -205,6 +206,9 @@ async function initSqlite(dataDir) {
   if (!userColumns.includes('notify_sms_enabled')) db.exec('ALTER TABLE users ADD COLUMN notify_sms_enabled INTEGER NOT NULL DEFAULT 0');
   if (!userColumns.includes('notify_closing_days')) db.exec('ALTER TABLE users ADD COLUMN notify_closing_days INTEGER NOT NULL DEFAULT 3');
   if (!userColumns.includes('notify_due_days')) db.exec('ALTER TABLE users ADD COLUMN notify_due_days INTEGER NOT NULL DEFAULT 3');
+  const transactionColumns = db.prepare('PRAGMA table_info(transactions)').all().map(column => column.name);
+  if (!transactionColumns.includes('reference_month')) db.exec('ALTER TABLE transactions ADD COLUMN reference_month TEXT');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_transactions_user_reference_month ON transactions(user_id, reference_month)');
   db.exec("UPDATE users SET role = 'admin' WHERE lower(email) = lower('glaucosl@gmail.com')");
   db.exec("UPDATE users SET role = 'admin' WHERE id = (SELECT id FROM users ORDER BY id LIMIT 1) AND NOT EXISTS (SELECT 1 FROM users WHERE role = 'admin')");
   return { kind: 'sqlite', prepare: (sql) => sqliteStatement(db, sql), close: () => db.close?.() };
@@ -316,6 +320,7 @@ async function initPostgres() {
       payment_method TEXT NOT NULL DEFAULT 'cash',
       card_id INTEGER REFERENCES cards(id) ON DELETE SET NULL,
       invoice_id INTEGER REFERENCES invoices(id) ON DELETE SET NULL,
+      reference_month TEXT,
       installment_group TEXT,
       installment_index INTEGER DEFAULT 1,
       installment_total INTEGER DEFAULT 1,
@@ -366,6 +371,8 @@ async function initPostgres() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_sms_enabled INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_closing_days INTEGER NOT NULL DEFAULT 3;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_due_days INTEGER NOT NULL DEFAULT 3;
+    ALTER TABLE transactions ADD COLUMN IF NOT EXISTS reference_month TEXT;
+    CREATE INDEX IF NOT EXISTS idx_transactions_user_reference_month ON transactions(user_id, reference_month);
     UPDATE users SET role = 'admin' WHERE lower(email) = lower('glaucosl@gmail.com');
     UPDATE users SET role = 'admin'
       WHERE id = (SELECT id FROM users ORDER BY id LIMIT 1)
@@ -497,13 +504,13 @@ export async function initDatabase({ dataDir }) {
     getTransaction: prepare('SELECT * FROM transactions WHERE id = ? AND user_id = ?'),
     insertTransaction: prepare({
       sqlite: `INSERT INTO transactions
-        (user_id, type, date, description, category, amount, payment_method, card_id, invoice_id, installment_group, installment_index, installment_total, notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        (user_id, type, date, description, category, amount, payment_method, card_id, invoice_id, reference_month, installment_group, installment_index, installment_total, notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       pg: `INSERT INTO transactions
-        (user_id, type, date, description, category, amount, payment_method, card_id, invoice_id, installment_group, installment_index, installment_total, notes)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`
+        (user_id, type, date, description, category, amount, payment_method, card_id, invoice_id, reference_month, installment_group, installment_index, installment_total, notes)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`
     }),
-    updateTransaction: prepare(`UPDATE transactions SET type=?, date=?, description=?, category=?, amount=?, payment_method=?, card_id=?, invoice_id=?, installment_group=?, installment_index=?, installment_total=?, notes=? WHERE id=? AND user_id=?`),
+    updateTransaction: prepare(`UPDATE transactions SET type=?, date=?, description=?, category=?, amount=?, payment_method=?, card_id=?, invoice_id=?, reference_month=?, installment_group=?, installment_index=?, installment_total=?, notes=? WHERE id=? AND user_id=?`),
     deleteTransaction: prepare('DELETE FROM transactions WHERE id=? AND user_id=?'),
     listInstallmentGroup: prepare('SELECT * FROM transactions WHERE user_id = ? AND installment_group = ? ORDER BY installment_index, id'),
     deleteTransactionGroupAfter: prepare('DELETE FROM transactions WHERE user_id = ? AND installment_group = ? AND installment_index > ?'),

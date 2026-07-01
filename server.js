@@ -411,6 +411,7 @@ function buildMonthRange(startMonth, endMonth, monthRows) {
 }
 
 function normalizeTransaction(input) {
+  const referenceMonth = String(input.reference_month || '').slice(0, 7);
   return {
     type: input.type === 'income' ? 'income' : 'expense',
     date: String(input.date || new Date().toISOString().slice(0, 10)).slice(0, 10),
@@ -420,6 +421,7 @@ function normalizeTransaction(input) {
     payment_method: String(input.payment_method || 'cash'),
     card_id: input.card_id ? Number(input.card_id) : null,
     invoice_id: input.invoice_id ? Number(input.invoice_id) : null,
+    reference_month: /^\d{4}-\d{2}$/.test(referenceMonth) ? referenceMonth : null,
     installment_group: input.installment_group || null,
     installment_index: Math.max(1, Number(input.installment_index || 1)),
     installment_total: Math.max(1, Number(input.installment_total || 1)),
@@ -433,6 +435,7 @@ function validateTransaction(tx) {
   if (!tx.category) throw new HttpError(400, 'Informe a categoria.');
   if (!Number.isFinite(tx.amount) || tx.amount <= 0) throw new HttpError(400, 'Informe um valor maior que zero.');
   if (tx.installment_index > tx.installment_total) throw new HttpError(400, 'A parcela atual nao pode ser maior que o total de parcelas.');
+  if (tx.reference_month && !/^\d{4}-\d{2}$/.test(tx.reference_month)) throw new HttpError(400, 'Mes de referencia invalido.');
 }
 
 async function validateOwnedReferences(userId, tx) {
@@ -457,8 +460,14 @@ async function normalizeAndValidateTransaction(userId, input) {
 
 async function createInvoiceRows(userId, input) {
   const tx = await normalizeAndValidateTransaction(userId, input);
+  if (!tx.reference_month && tx.invoice_id) {
+    const invoice = await statements.getInvoice.get(tx.invoice_id, userId);
+    tx.reference_month = invoice?.month || null;
+  }
+  if (!tx.reference_month) tx.reference_month = tx.date.slice(0, 7);
   const total = Math.max(1, Math.min(120, Number(tx.installment_total || input.installment_total || 1)));
   const current = Math.max(1, Math.min(total, Number(tx.installment_index || input.installment_index || 1)));
+  const baseReferenceMonth = tx.reference_month;
   const shouldProject = tx.type === 'expense' && tx.payment_method === 'credit_card' && total > current;
   const existingCurrent = total > 1
     ? await statements.findProjectedInstallment.get(userId, tx.type, tx.card_id, tx.card_id, current, total, tx.amount, tx.description)
@@ -469,12 +478,13 @@ async function createInvoiceRows(userId, input) {
 
   for (let index = current; index <= total; index++) {
     const date = monthAdd(tx.date, index - current);
+    const referenceMonth = addMonthsToMonth(baseReferenceMonth, index - current);
     const projectedNotes = index === current ? tx.notes : [tx.notes, 'Parcela futura prevista a partir da fatura.'].filter(Boolean).join(' ');
     const existingProjected = index === current
       ? existingCurrent
       : group ? await statements.findProjectedInstallmentByGroup.get(userId, group, index) : null;
     if (existingProjected) {
-      await statements.updateTransaction.run(tx.type, date, tx.description, tx.category, tx.amount, tx.payment_method, tx.card_id, index === current ? tx.invoice_id : null, group, index, total, projectedNotes, existingProjected.id, userId);
+      await statements.updateTransaction.run(tx.type, date, tx.description, tx.category, tx.amount, tx.payment_method, tx.card_id, index === current ? tx.invoice_id : null, referenceMonth, group, index, total, projectedNotes, existingProjected.id, userId);
       updated += 1;
     } else {
       await statements.insertTransaction.run(
@@ -487,6 +497,7 @@ async function createInvoiceRows(userId, input) {
         tx.payment_method,
         tx.card_id,
         index === current ? tx.invoice_id : null,
+        referenceMonth,
         group,
         index,
         total,
@@ -504,6 +515,7 @@ async function createTransactionRows(userId, input) {
   const tx = await normalizeAndValidateTransaction(userId, input);
   const total = Math.max(1, Math.min(120, Number(input.installments || tx.installment_total || 1)));
   const current = Math.max(1, Math.min(total, Number(input.installment_index || tx.installment_index || 1)));
+  const baseReferenceMonth = tx.reference_month || (tx.payment_method === 'credit_card' ? tx.date.slice(0, 7) : null);
   const shouldProject = total > current && !input.id;
   const rows = [];
   if (shouldProject) {
@@ -513,6 +525,7 @@ async function createTransactionRows(userId, input) {
       rows.push({
         ...tx,
         date: monthAdd(tx.date, index - current),
+        reference_month: baseReferenceMonth ? addMonthsToMonth(baseReferenceMonth, index - current) : null,
         installment_group: group,
         installment_index: index,
         installment_total: total,
@@ -520,10 +533,10 @@ async function createTransactionRows(userId, input) {
       });
     }
   } else {
-    rows.push({ ...tx, installment_total: total, installment_index: current });
+    rows.push({ ...tx, reference_month: baseReferenceMonth, installment_total: total, installment_index: current });
   }
   for (const row of rows) {
-    await statements.insertTransaction.run(userId, row.type, row.date, row.description, row.category, row.amount, row.payment_method, row.card_id, row.invoice_id, row.installment_group, row.installment_index, row.installment_total, row.notes);
+    await statements.insertTransaction.run(userId, row.type, row.date, row.description, row.category, row.amount, row.payment_method, row.card_id, row.invoice_id, row.reference_month, row.installment_group, row.installment_index, row.installment_total, row.notes);
     await statements.addCategory.run(userId, row.category, row.type);
   }
   return rows.length;
@@ -536,6 +549,7 @@ async function updateTransactionRows(userId, id, input) {
   const tx = normalizeTransaction({
     ...input,
     invoice_id: input.invoice_id ?? existing.invoice_id,
+    reference_month: input.reference_month ?? existing.reference_month,
     installment_group: input.installment_group ?? existing.installment_group,
     installment_index: input.installment_index ?? existing.installment_index,
     installment_total: input.installment_total ?? existing.installment_total
@@ -549,7 +563,7 @@ async function updateTransactionRows(userId, id, input) {
 
   const hadInstallmentSeries = existing.installment_group || Number(existing.installment_total || 1) > 1;
   if (!hadInstallmentSeries && total === 1) {
-    await statements.updateTransaction.run(tx.type, tx.date, tx.description, tx.category, tx.amount, tx.payment_method, tx.card_id, tx.invoice_id, null, 1, 1, tx.notes, id, userId);
+    await statements.updateTransaction.run(tx.type, tx.date, tx.description, tx.category, tx.amount, tx.payment_method, tx.card_id, tx.invoice_id, tx.reference_month, null, 1, 1, tx.notes, id, userId);
     await statements.addCategory.run(userId, tx.category, tx.type);
     return { updated: 1, created: 0, deleted: 0 };
   }
@@ -559,7 +573,7 @@ async function updateTransactionRows(userId, id, input) {
     const deleted = existing.installment_group
       ? (await statements.deleteTransactionGroupExcept.run(userId, existing.installment_group, id)).changes
       : 0;
-    await statements.updateTransaction.run(tx.type, tx.date, tx.description, tx.category, tx.amount, tx.payment_method, tx.card_id, tx.invoice_id, null, 1, 1, tx.notes, id, userId);
+    await statements.updateTransaction.run(tx.type, tx.date, tx.description, tx.category, tx.amount, tx.payment_method, tx.card_id, tx.invoice_id, tx.reference_month, null, 1, 1, tx.notes, id, userId);
     await statements.addCategory.run(userId, tx.category, tx.type);
     return { updated: 1, created: 0, deleted };
   }
@@ -574,18 +588,22 @@ async function updateTransactionRows(userId, id, input) {
   }
 
   const baseDate = monthAdd(tx.date, 1 - current);
+  const baseReferenceMonth = tx.reference_month
+    ? addMonthsToMonth(tx.reference_month, 1 - current)
+    : tx.payment_method === 'credit_card' ? baseDate.slice(0, 7) : null;
   let updated = 0;
   let created = 0;
   for (let index = 1; index <= total; index++) {
     const row = rowsByIndex.get(index);
     const date = monthAdd(baseDate, index - 1);
+    const referenceMonth = baseReferenceMonth ? addMonthsToMonth(baseReferenceMonth, index - 1) : null;
     const notes = index === current ? tx.notes : [tx.notes, 'Parcela futura prevista a partir de lancamento manual.'].filter(Boolean).join(' ');
     const invoiceId = row?.invoice_id || (index === current ? tx.invoice_id : null);
     if (row) {
-      await statements.updateTransaction.run(tx.type, date, tx.description, tx.category, tx.amount, tx.payment_method, tx.card_id, invoiceId, group, index, total, notes, row.id, userId);
+      await statements.updateTransaction.run(tx.type, date, tx.description, tx.category, tx.amount, tx.payment_method, tx.card_id, invoiceId, referenceMonth, group, index, total, notes, row.id, userId);
       updated += 1;
     } else {
-      await statements.insertTransaction.run(userId, tx.type, date, tx.description, tx.category, tx.amount, tx.payment_method, tx.card_id, invoiceId, group, index, total, notes);
+      await statements.insertTransaction.run(userId, tx.type, date, tx.description, tx.category, tx.amount, tx.payment_method, tx.card_id, invoiceId, referenceMonth, group, index, total, notes);
       created += 1;
     }
   }
@@ -764,12 +782,13 @@ function isInvoiceCurrentInstallment(tx, invoiceCurrentRowIds) {
 function buildInvoiceMonthAnchors(transactions, invoiceCurrentRowIds) {
   const anchors = {};
   for (const tx of transactions) {
-    if (tx.type !== 'expense' || tx.payment_method !== 'credit_card' || !tx.installment_group || !tx.invoice_month) continue;
+    const referenceMonth = tx.reference_month || tx.invoice_month;
+    if (tx.type !== 'expense' || tx.payment_method !== 'credit_card' || !tx.installment_group || !referenceMonth) continue;
     if (!isInvoiceCurrentInstallment(tx, invoiceCurrentRowIds)) continue;
     anchors[tx.installment_group] ||= [];
     anchors[tx.installment_group].push({
       index: Math.max(1, Number(tx.installment_index || 1)),
-      month: tx.invoice_month
+      month: referenceMonth
     });
   }
   for (const group of Object.keys(anchors)) {
@@ -780,6 +799,7 @@ function buildInvoiceMonthAnchors(transactions, invoiceCurrentRowIds) {
 
 function creditCardReferenceMonth(tx, invoiceAnchors, invoiceCurrentRowIds) {
   if (tx.type !== 'expense' || tx.payment_method !== 'credit_card') return tx.date.slice(0, 7);
+  if (tx.reference_month) return tx.reference_month;
   if (tx.invoice_month && isInvoiceCurrentInstallment(tx, invoiceCurrentRowIds)) return tx.invoice_month;
   const index = Math.max(1, Number(tx.installment_index || 1));
   const anchors = tx.installment_group ? invoiceAnchors[tx.installment_group] || [] : [];
@@ -1643,11 +1663,13 @@ async function handleApi(req, res, url) {
     }
     const text = await extractPdfText(storedPath);
     const parsed = parseInvoiceText(text, invoice.month);
+    const rows = parsed.rows.map(row => ({ ...row, reference_month: row.reference_month || invoice.month }));
     return sendJson(res, 200, {
       invoice_id: id,
       card_id: invoice.card_id,
+      month: invoice.month,
       total: parsed.total,
-      rows: parsed.rows,
+      rows,
       extracted_text: text.slice(0, 20000),
       replace_existing: true
     });
@@ -1674,11 +1696,13 @@ async function handleApi(req, res, url) {
     writeFileSync(filePath, file.buffer);
     const text = await extractPdfText(filePath);
     const parsed = parseInvoiceText(text, month);
+    const rows = parsed.rows.map(row => ({ ...row, reference_month: row.reference_month || month }));
     const invoice = await statements.insertInvoice.run(user.id, cardId, month, file.filename, stored, parsed.total);
     return sendJson(res, 201, {
       invoice_id: invoice.lastInsertRowid,
+      month,
       total: parsed.total,
-      rows: parsed.rows,
+      rows,
       extracted_chars: text.length,
       extracted_text: text.slice(0, 30000)
     });
