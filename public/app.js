@@ -18,6 +18,10 @@ const formatMonth = (month) => {
   const [year, value] = String(month || '').split('-');
   return year && value ? `${value}/${year}` : month;
 };
+const formatDate = (date) => {
+  const [year, month, day] = String(date || '').split('-');
+  return year && month && day ? `${day}/${month}/${year}` : date;
+};
 let invoiceProgressTimer = null;
 let selectedDashboardMonth = currentMonth();
 let selectedTransactionMonth = 'all';
@@ -28,6 +32,18 @@ let transactionSortDirection = 'desc';
 const TRANSACTION_PAGE_SIZE = 15;
 const THEME_KEY = 'cfdr-theme';
 const APP_SESSION_KEY = 'cfdr-active-session';
+const REPORT_FILTER_IDS = [
+  'reportDateBasis',
+  'reportStartMonth',
+  'reportEndMonth',
+  'reportTypeFilter',
+  'reportCategoryFilter',
+  'reportMethodFilter',
+  'reportCardFilter',
+  'reportSourceFilter',
+  'reportGroupBy',
+  'reportSearch'
+];
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -197,6 +213,7 @@ async function refreshAll() {
   renderCategories();
   renderCategoryManager();
   renderTransactions();
+  renderReports();
   renderCards();
   renderInvoices();
   renderDashboard(dashboard);
@@ -586,6 +603,285 @@ function transactionCategoryKey(tx) {
 
 function isPlannedInstallment(tx) {
   return Number(tx.installment_total || 1) > 1;
+}
+
+function labelType(type) {
+  return type === 'income' ? 'Receita' : 'Despesa';
+}
+
+function reportReferenceMonth(tx) {
+  return tx.reference_month || tx.invoice_month || String(tx.date || '').slice(0, 7);
+}
+
+function reportMonth(tx) {
+  return $('reportDateBasis')?.value === 'reference'
+    ? reportReferenceMonth(tx)
+    : String(tx.date || '').slice(0, 7);
+}
+
+function reportCardName(tx) {
+  if (tx.card_name) return tx.card_name;
+  if (tx.card_id) return state.cards.find(card => Number(card.id) === Number(tx.card_id))?.name || 'Cartao sem nome';
+  return 'Sem cartao';
+}
+
+function emptyReportTotals(label = '') {
+  return { label, count: 0, income: 0, expense: 0, balance: 0 };
+}
+
+function addReportTotals(totals, tx) {
+  const amount = Number(tx.amount || 0);
+  totals.count += 1;
+  if (tx.type === 'income') {
+    totals.income += amount;
+    totals.balance += amount;
+  } else {
+    totals.expense += amount;
+    totals.balance -= amount;
+  }
+}
+
+function reportCategoryOptions(selected) {
+  const typeFilter = $('reportTypeFilter')?.value || 'all';
+  const categories = state.categories
+    .filter(category => typeFilter === 'all' || category.type === typeFilter)
+    .map(category => ({
+      key: `${category.type}::${category.name}`,
+      label: `${labelType(category.type)} - ${category.name}`
+    }));
+  const existingKeys = new Set(categories.map(category => category.key));
+  for (const tx of state.transactions) {
+    if (typeFilter !== 'all' && tx.type !== typeFilter) continue;
+    const key = transactionCategoryKey(tx);
+    if (!existingKeys.has(key)) {
+      categories.push({ key, label: `${labelType(tx.type)} - ${tx.category}` });
+      existingKeys.add(key);
+    }
+  }
+  categories.sort((a, b) => a.label.localeCompare(b.label, 'pt-BR'));
+  $('reportCategoryFilter').innerHTML = [
+    '<option value="all">Todas as categorias</option>',
+    ...categories.map(category => `<option value="${escapeAttr(category.key)}">${escapeHtml(category.label)}</option>`)
+  ].join('');
+  $('reportCategoryFilter').value = existingKeys.has(selected) ? selected : 'all';
+}
+
+function renderReportFilters() {
+  if (!$('reportDateBasis')) return;
+  const dateMonths = state.transactions.map(tx => String(tx.date || '').slice(0, 7)).filter(Boolean);
+  const referenceMonths = state.transactions.map(reportReferenceMonth).filter(Boolean);
+  const months = Array.from(new Set([...dateMonths, ...referenceMonths])).sort();
+  if (!$('reportStartMonth').value) $('reportStartMonth').value = months[0] || currentMonth();
+  if (!$('reportEndMonth').value) $('reportEndMonth').value = months[months.length - 1] || currentMonth();
+
+  reportCategoryOptions($('reportCategoryFilter').value);
+
+  const currentCard = $('reportCardFilter').value || 'all';
+  const cardRows = state.cards.map(card => ({ key: String(card.id), label: card.name }));
+  const existingCards = new Set(cardRows.map(card => card.key));
+  for (const tx of state.transactions) {
+    if (!tx.card_id || existingCards.has(String(tx.card_id))) continue;
+    cardRows.push({ key: String(tx.card_id), label: reportCardName(tx) });
+    existingCards.add(String(tx.card_id));
+  }
+  cardRows.sort((a, b) => a.label.localeCompare(b.label, 'pt-BR'));
+  $('reportCardFilter').innerHTML = [
+    '<option value="all">Todos os cartoes</option>',
+    ...cardRows.map(card => `<option value="${escapeAttr(card.key)}">${escapeHtml(card.label)}</option>`)
+  ].join('');
+  $('reportCardFilter').value = existingCards.has(currentCard) ? currentCard : 'all';
+}
+
+function reportSearchText(tx) {
+  return [
+    tx.description,
+    tx.category,
+    labelType(tx.type),
+    labelMethod(tx.payment_method),
+    reportCardName(tx),
+    tx.notes,
+    tx.invoice_name
+  ].join(' ').toLocaleLowerCase('pt-BR');
+}
+
+function isInvoiceReportRow(tx) {
+  return Number(tx.invoice_id || 0) > 0 || /a partir da fatura/i.test(tx.notes || '');
+}
+
+function matchesReportSource(tx, source) {
+  if (source === 'invoice') return isInvoiceReportRow(tx);
+  if (source === 'manual') return !isInvoiceReportRow(tx);
+  if (source === 'installment') return isPlannedInstallment(tx);
+  if (source === 'future') return isPlannedInstallment(tx) && reportMonth(tx) >= currentMonth();
+  return true;
+}
+
+function getFilteredReportRows() {
+  const startMonth = $('reportStartMonth')?.value || '';
+  const endMonth = $('reportEndMonth')?.value || '';
+  const start = startMonth && endMonth && startMonth > endMonth ? endMonth : startMonth;
+  const end = startMonth && endMonth && startMonth > endMonth ? startMonth : endMonth;
+  const typeFilter = $('reportTypeFilter')?.value || 'all';
+  const categoryFilter = $('reportCategoryFilter')?.value || 'all';
+  const methodFilter = $('reportMethodFilter')?.value || 'all';
+  const cardFilter = $('reportCardFilter')?.value || 'all';
+  const sourceFilter = $('reportSourceFilter')?.value || 'all';
+  const search = ($('reportSearch')?.value || '').trim().toLocaleLowerCase('pt-BR');
+
+  return state.transactions.filter(tx => {
+    const month = reportMonth(tx);
+    if (start && month < start) return false;
+    if (end && month > end) return false;
+    if (typeFilter !== 'all' && tx.type !== typeFilter) return false;
+    if (categoryFilter !== 'all' && transactionCategoryKey(tx) !== categoryFilter) return false;
+    if (methodFilter !== 'all' && tx.payment_method !== methodFilter) return false;
+    if (cardFilter !== 'all' && String(tx.card_id || '') !== cardFilter) return false;
+    if (!matchesReportSource(tx, sourceFilter)) return false;
+    if (search && !reportSearchText(tx).includes(search)) return false;
+    return true;
+  });
+}
+
+function reportGroupInfo(tx, groupBy) {
+  const month = reportMonth(tx);
+  if (groupBy === 'day') return { key: tx.date || 'sem-data', label: formatDate(tx.date) };
+  if (groupBy === 'category') return { key: transactionCategoryKey(tx), label: `${labelType(tx.type)} - ${tx.category}` };
+  if (groupBy === 'description') return { key: String(tx.description || '').toLocaleLowerCase('pt-BR'), label: tx.description || 'Sem descricao' };
+  if (groupBy === 'type') return { key: tx.type, label: labelType(tx.type) };
+  if (groupBy === 'method') return { key: tx.payment_method || 'none', label: labelMethod(tx.payment_method) };
+  if (groupBy === 'card') return { key: String(tx.card_id || 'none'), label: reportCardName(tx) };
+  if (groupBy === 'installment') return isPlannedInstallment(tx)
+    ? { key: 'installment', label: 'Parcelados' }
+    : { key: 'single', label: 'Sem parcelamento' };
+  if (groupBy === 'none') return { key: 'total', label: 'Total geral' };
+  return { key: month, label: formatMonth(month) };
+}
+
+function compareReportRows(a, b) {
+  const monthResult = reportMonth(a).localeCompare(reportMonth(b));
+  if (monthResult) return monthResult;
+  const dateResult = String(a.date || '').localeCompare(String(b.date || ''));
+  if (dateResult) return dateResult;
+  return Number(a.id || 0) - Number(b.id || 0);
+}
+
+function buildReportData() {
+  const rows = getFilteredReportRows().sort(compareReportRows);
+  const totals = emptyReportTotals('Total geral');
+  const groupBy = $('reportGroupBy')?.value || 'month';
+  const groupMap = new Map();
+  for (const tx of rows) {
+    const group = reportGroupInfo(tx, groupBy);
+    if (!groupMap.has(group.key)) groupMap.set(group.key, { key: group.key, ...emptyReportTotals(group.label) });
+    addReportTotals(groupMap.get(group.key), tx);
+    addReportTotals(totals, tx);
+  }
+  const groups = Array.from(groupMap.values()).sort((a, b) => {
+    if (groupBy === 'month' || groupBy === 'day') return a.key.localeCompare(b.key);
+    if (groupBy === 'none') return 0;
+    return Math.abs(b.balance) - Math.abs(a.balance) || a.label.localeCompare(b.label, 'pt-BR');
+  });
+  return { rows, groups, totals, groupBy };
+}
+
+function renderReports() {
+  if (!$('reportDateBasis')) return;
+  renderReportFilters();
+  const { rows, groups, totals } = buildReportData();
+  $('reportIncomeMetric').textContent = money(totals.income);
+  $('reportExpenseMetric').textContent = money(totals.expense);
+  $('reportBalanceMetric').textContent = money(totals.balance);
+  $('reportCountMetric').textContent = String(totals.count);
+  $('reportSummaryText').textContent = rows.length
+    ? `${rows.length} lancamentos encontrados | ${formatMonth($('reportStartMonth').value)} ate ${formatMonth($('reportEndMonth').value)}`
+    : 'Nenhum lancamento encontrado para os filtros selecionados.';
+
+  $('reportGroupsTable').innerHTML = groups.length ? groups.map(group => `
+    <tr>
+      <td><strong>${escapeHtml(group.label)}</strong></td>
+      <td>${group.count}</td>
+      <td>${money(group.income)}</td>
+      <td>${money(group.expense)}</td>
+      <td class="${group.balance < 0 ? 'negative' : 'positive'}">${money(group.balance)}</td>
+    </tr>
+  `).join('') : '<tr><td colspan="5">Sem subtotais para os filtros selecionados.</td></tr>';
+  $('reportGroupsFoot').innerHTML = `
+    <tr>
+      <th>Total geral</th>
+      <th>${totals.count}</th>
+      <th>${money(totals.income)}</th>
+      <th>${money(totals.expense)}</th>
+      <th class="${totals.balance < 0 ? 'negative' : 'positive'}">${money(totals.balance)}</th>
+    </tr>
+  `;
+
+  $('reportRowsTable').innerHTML = rows.length ? rows.map(tx => `
+    <tr>
+      <td>${tx.date}</td>
+      <td>${formatMonth(reportReferenceMonth(tx))}</td>
+      <td>${labelType(tx.type)}</td>
+      <td>${escapeHtml(tx.description)}</td>
+      <td>${escapeHtml(tx.category)}</td>
+      <td>${tx.type === 'income' ? '+' : '-'} ${money(tx.amount)}</td>
+      <td>${labelMethod(tx.payment_method)}</td>
+      <td>${escapeHtml(reportCardName(tx))}</td>
+      <td>${isPlannedInstallment(tx) ? `${tx.installment_index || 1}/${tx.installment_total || 1}` : '-'}</td>
+    </tr>
+  `).join('') : '<tr><td colspan="9">Nenhum lancamento encontrado.</td></tr>';
+}
+
+function csvCell(value) {
+  return `"${String(value ?? '').replace(/"/g, '""')}"`;
+}
+
+function exportReportCsv() {
+  const { rows, groups, totals } = buildReportData();
+  const lines = [
+    ['Relatorio financeiro'].map(csvCell).join(';'),
+    ['Periodo', $('reportStartMonth').value, $('reportEndMonth').value].map(csvCell).join(';'),
+    [],
+    ['Subtotais'].map(csvCell).join(';'),
+    ['Grupo', 'Lancamentos', 'Receitas', 'Despesas', 'Saldo'].map(csvCell).join(';'),
+    ...groups.map(group => [group.label, group.count, group.income.toFixed(2), group.expense.toFixed(2), group.balance.toFixed(2)].map(csvCell).join(';')),
+    ['Total geral', totals.count, totals.income.toFixed(2), totals.expense.toFixed(2), totals.balance.toFixed(2)].map(csvCell).join(';'),
+    [],
+    ['Detalhamento'].map(csvCell).join(';'),
+    ['Data', 'Mes ref.', 'Tipo', 'Descricao', 'Categoria', 'Valor', 'Meio', 'Cartao', 'Parcela', 'Observacoes'].map(csvCell).join(';'),
+    ...rows.map(tx => [
+      tx.date,
+      reportReferenceMonth(tx),
+      labelType(tx.type),
+      tx.description,
+      tx.category,
+      (tx.type === 'income' ? Number(tx.amount || 0) : -Number(tx.amount || 0)).toFixed(2),
+      labelMethod(tx.payment_method),
+      reportCardName(tx),
+      isPlannedInstallment(tx) ? `${tx.installment_index || 1}/${tx.installment_total || 1}` : '',
+      tx.notes || ''
+    ].map(csvCell).join(';'))
+  ];
+  const blob = new Blob([`\uFEFF${lines.join('\n')}`], { type: 'text/csv;charset=utf-8' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = `relatorio-financeiro-${today()}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  URL.revokeObjectURL(link.href);
+  link.remove();
+}
+
+function resetReportFilters() {
+  $('reportDateBasis').value = 'date';
+  $('reportTypeFilter').value = 'all';
+  $('reportMethodFilter').value = 'all';
+  $('reportSourceFilter').value = 'all';
+  $('reportGroupBy').value = 'month';
+  $('reportSearch').value = '';
+  $('reportCategoryFilter').value = 'all';
+  $('reportCardFilter').value = 'all';
+  $('reportStartMonth').value = '';
+  $('reportEndMonth').value = '';
+  renderReports();
 }
 
 function renderCards() {
@@ -1126,6 +1422,13 @@ $('transactionNextPage').addEventListener('click', () => {
   transactionPage += 1;
   renderTransactions();
 });
+REPORT_FILTER_IDS.forEach(id => {
+  const element = $(id);
+  if (!element) return;
+  element.addEventListener(id === 'reportSearch' ? 'input' : 'change', renderReports);
+});
+$('resetReportBtn').addEventListener('click', resetReportFilters);
+$('exportReportCsvBtn').addEventListener('click', exportReportCsv);
 
 $('transactionForm').addEventListener('submit', async (event) => {
   event.preventDefault();

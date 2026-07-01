@@ -286,6 +286,25 @@ nav { display: grid; gap: 8px; }
   gap: 12px;
   align-items: center;
 }
+.report-filter {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(150px, 1fr));
+  gap: 12px;
+  align-items: end;
+}
+.filter-field {
+  display: grid;
+  gap: 6px;
+}
+.filter-field span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+.filter-field.span-two {
+  grid-column: span 2;
+}
 .transactions-filter h3 { margin-bottom: 4px; }
 .transactions-filter p {
   color: var(--muted);
@@ -310,6 +329,9 @@ nav { display: grid; gap: 8px; }
   display: block;
   font-size: 30px;
   margin-top: 10px;
+}
+.report-metrics {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 .grid.two {
   display: grid;
@@ -408,6 +430,20 @@ th {
   text-transform: uppercase;
   background: var(--surface-soft);
 }
+tfoot th {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--primary) 8%, var(--surface-soft));
+}
+.report-summary-table td:nth-child(n+2),
+.report-summary-table th:nth-child(n+2) {
+  text-align: right;
+}
+.report-summary-table td:first-child,
+.report-summary-table th:first-child {
+  text-align: left;
+}
+.positive { color: var(--success); font-weight: 900; }
+.negative { color: var(--danger); font-weight: 900; }
 .sort-header {
   appearance: none;
   border: 0;
@@ -624,6 +660,8 @@ td:last-child { text-align: right; white-space: nowrap; }
   .topbar { align-items: flex-start; }
   .dashboard-filter { grid-template-columns: 1fr; }
   .transactions-filter { grid-template-columns: 1fr 1fr; }
+  .report-filter { grid-template-columns: 1fr 1fr; }
+  .report-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .form-grid, .form-grid.compact, .category-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .edit-status { grid-template-columns: 1fr; }
 }
@@ -634,6 +672,8 @@ td:last-child { text-align: right; white-space: nowrap; }
   .bar-row { grid-template-columns: 1fr; }
   .metrics { grid-template-columns: 1fr; }
   .transactions-filter { grid-template-columns: 1fr; }
+  .report-filter, .report-metrics { grid-template-columns: 1fr; }
+  .filter-field.span-two { grid-column: auto; }
   .pagination-bar { align-items: stretch; flex-direction: column; }
   .pagination-bar div { justify-content: stretch; }
   .pagination-bar button { flex: 1; }

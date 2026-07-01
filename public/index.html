@@ -34,6 +34,7 @@
       </div>
       <nav>
         <button class="nav active" data-view="dashboard">Dashboard</button>
+        <button class="nav" data-view="reports">Relatorios</button>
         <button class="nav" data-view="transactions">Lancamentos</button>
         <button class="nav" data-view="investments">Investimentos</button>
         <button class="nav" data-view="categories">Categorias</button>
@@ -92,6 +93,129 @@
         <section>
           <h3>Receitas x despesas por mes</h3>
           <div id="monthBars" class="bars wide"></div>
+        </section>
+      </section>
+
+      <section id="reports" class="view">
+        <section class="section-head">
+          <div>
+            <h3>Relatorios financeiros</h3>
+            <p class="muted">Filtre, agrupe e confira subtotais com base na data do lancamento ou no mes de referencia.</p>
+          </div>
+          <div class="actions">
+            <button type="button" id="resetReportBtn" class="secondary">Limpar filtros</button>
+            <button type="button" id="exportReportCsvBtn">Exportar CSV</button>
+          </div>
+        </section>
+        <section class="report-filter">
+          <label class="filter-field">
+            <span>Base do periodo</span>
+            <select id="reportDateBasis">
+              <option value="date">Data do lancamento</option>
+              <option value="reference">Mes referencia/cartao</option>
+            </select>
+          </label>
+          <label class="filter-field">
+            <span>De</span>
+            <input id="reportStartMonth" type="month">
+          </label>
+          <label class="filter-field">
+            <span>Ate</span>
+            <input id="reportEndMonth" type="month">
+          </label>
+          <label class="filter-field">
+            <span>Tipo</span>
+            <select id="reportTypeFilter">
+              <option value="all">Receitas e despesas</option>
+              <option value="expense">Somente despesas</option>
+              <option value="income">Somente receitas</option>
+            </select>
+          </label>
+          <label class="filter-field">
+            <span>Categoria</span>
+            <select id="reportCategoryFilter"></select>
+          </label>
+          <label class="filter-field">
+            <span>Meio</span>
+            <select id="reportMethodFilter">
+              <option value="all">Todos os meios</option>
+              <option value="cash">Dinheiro/Pix</option>
+              <option value="bank">Conta bancaria</option>
+              <option value="debit_card">Debito</option>
+              <option value="credit_card">Cartao de credito</option>
+            </select>
+          </label>
+          <label class="filter-field">
+            <span>Cartao</span>
+            <select id="reportCardFilter"></select>
+          </label>
+          <label class="filter-field">
+            <span>Origem</span>
+            <select id="reportSourceFilter">
+              <option value="all">Todas as origens</option>
+              <option value="invoice">Faturas PDF</option>
+              <option value="manual">Lancamentos manuais</option>
+              <option value="installment">Parcelados</option>
+              <option value="future">Parcelas futuras</option>
+            </select>
+          </label>
+          <label class="filter-field">
+            <span>Agrupar por</span>
+            <select id="reportGroupBy">
+              <option value="month">Mes</option>
+              <option value="day">Dia</option>
+              <option value="category">Categoria</option>
+              <option value="description">Descricao/estabelecimento</option>
+              <option value="type">Receita/Despesa</option>
+              <option value="method">Meio de pagamento</option>
+              <option value="card">Cartao</option>
+              <option value="installment">Parcelamento</option>
+              <option value="none">Sem agrupamento</option>
+            </select>
+          </label>
+          <label class="filter-field span-two">
+            <span>Buscar</span>
+            <input id="reportSearch" placeholder="Descricao, categoria, cartao ou observacao">
+          </label>
+        </section>
+        <div class="metrics report-metrics">
+          <article><span>Receitas filtradas</span><strong id="reportIncomeMetric">R$ 0,00</strong></article>
+          <article><span>Despesas filtradas</span><strong id="reportExpenseMetric">R$ 0,00</strong></article>
+          <article><span>Saldo filtrado</span><strong id="reportBalanceMetric">R$ 0,00</strong></article>
+          <article><span>Lancamentos</span><strong id="reportCountMetric">0</strong></article>
+        </div>
+        <section>
+          <div class="section-head">
+            <div>
+              <h3>Subtotais</h3>
+              <p id="reportSummaryText" class="muted">Nenhum filtro aplicado.</p>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="report-table report-summary-table">
+              <thead>
+                <tr><th>Grupo</th><th>Lancamentos</th><th>Receitas</th><th>Despesas</th><th>Saldo</th></tr>
+              </thead>
+              <tbody id="reportGroupsTable"></tbody>
+              <tfoot id="reportGroupsFoot"></tfoot>
+            </table>
+          </div>
+        </section>
+        <section>
+          <div class="section-head">
+            <div>
+              <h3>Detalhamento</h3>
+              <p class="muted">Lista completa dos lancamentos que formam os subtotais acima.</p>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="report-table">
+              <thead>
+                <tr><th>Data</th><th>Mes ref.</th><th>Tipo</th><th>Descricao</th><th>Categoria</th><th>Valor</th><th>Meio</th><th>Cartao</th><th>Parcela</th></tr>
+              </thead>
+              <tbody id="reportRowsTable"></tbody>
+            </table>
+          </div>
         </section>
       </section>
 
