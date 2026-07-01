@@ -798,8 +798,9 @@ function buildInvoiceMonthAnchors(transactions, invoiceCurrentRowIds) {
 }
 
 function creditCardReferenceMonth(tx, invoiceAnchors, invoiceCurrentRowIds) {
-  if (tx.type !== 'expense' || tx.payment_method !== 'credit_card') return tx.date.slice(0, 7);
+  if (tx.payment_method !== 'credit_card') return tx.date.slice(0, 7);
   if (tx.reference_month) return tx.reference_month;
+  if (tx.type !== 'expense') return tx.date.slice(0, 7);
   if (tx.invoice_month && isInvoiceCurrentInstallment(tx, invoiceCurrentRowIds)) return tx.invoice_month;
   const index = Math.max(1, Number(tx.installment_index || 1));
   const anchors = tx.installment_group ? invoiceAnchors[tx.installment_group] || [] : [];
@@ -843,13 +844,14 @@ async function dashboard(userId, selectedMonth = null) {
     const amount = Number(tx.amount || 0);
     const cardAmount = tx.type === 'income' ? -amount : amount;
     const cardMonth = creditCardReferenceMonth(tx, invoiceAnchors, invoiceCurrentRowIds);
-    monthRows[month] ||= { month, income: 0, expense: 0, forecast_card: 0 };
-    monthRows[month][tx.type] += amount;
+    const dashboardMonth = tx.payment_method === 'credit_card' ? cardMonth : month;
+    monthRows[dashboardMonth] ||= { month: dashboardMonth, income: 0, expense: 0, forecast_card: 0 };
+    monthRows[dashboardMonth][tx.type] += amount;
     if (tx.payment_method === 'credit_card') {
       cardMonthRows[cardMonth] ||= { month: cardMonth, income: 0, expense: 0, forecast_card: 0 };
       cardMonthRows[cardMonth].forecast_card += cardAmount;
     }
-    if (month === activeMonth) {
+    if (dashboardMonth === activeMonth) {
       if (tx.type === 'income') incomeMonth += amount;
       else {
         expenseMonth += amount;
