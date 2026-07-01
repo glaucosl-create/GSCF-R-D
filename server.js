@@ -742,10 +742,30 @@ async function investmentsDashboard(userId) {
   return { assets, movements, ...buildInvestmentSummary(assets, movements) };
 }
 
-function buildInvoiceMonthAnchors(transactions) {
+function buildInvoiceCurrentRowIds(transactions) {
+  const currentRows = {};
+  for (const tx of transactions) {
+    if (!tx.invoice_id || !tx.installment_group) continue;
+    const key = `${tx.invoice_id}:${tx.installment_group}`;
+    const index = Math.max(1, Number(tx.installment_index || 1));
+    const id = Number(tx.id || 0);
+    const current = currentRows[key];
+    if (!current || index < current.index || (index === current.index && id < current.id)) {
+      currentRows[key] = { id, index };
+    }
+  }
+  return new Set(Object.values(currentRows).map(row => row.id));
+}
+
+function isInvoiceCurrentInstallment(tx, invoiceCurrentRowIds) {
+  return !tx.invoice_id || !tx.installment_group || invoiceCurrentRowIds.has(Number(tx.id || 0));
+}
+
+function buildInvoiceMonthAnchors(transactions, invoiceCurrentRowIds) {
   const anchors = {};
   for (const tx of transactions) {
     if (tx.type !== 'expense' || tx.payment_method !== 'credit_card' || !tx.installment_group || !tx.invoice_month) continue;
+    if (!isInvoiceCurrentInstallment(tx, invoiceCurrentRowIds)) continue;
     anchors[tx.installment_group] ||= [];
     anchors[tx.installment_group].push({
       index: Math.max(1, Number(tx.installment_index || 1)),
@@ -758,9 +778,9 @@ function buildInvoiceMonthAnchors(transactions) {
   return anchors;
 }
 
-function creditCardReferenceMonth(tx, invoiceAnchors) {
+function creditCardReferenceMonth(tx, invoiceAnchors, invoiceCurrentRowIds) {
   if (tx.type !== 'expense' || tx.payment_method !== 'credit_card') return tx.date.slice(0, 7);
-  if (tx.invoice_month) return tx.invoice_month;
+  if (tx.invoice_month && isInvoiceCurrentInstallment(tx, invoiceCurrentRowIds)) return tx.invoice_month;
   const index = Math.max(1, Number(tx.installment_index || 1));
   const anchors = tx.installment_group ? invoiceAnchors[tx.installment_group] || [] : [];
   if (!anchors.length) return tx.date.slice(0, 7);
@@ -773,22 +793,38 @@ function creditCardReferenceMonth(tx, invoiceAnchors) {
 }
 
 async function dashboard(userId, selectedMonth = null) {
-  const transactions = await statements.listTransactions.all(userId);
+  const [transactions, invoices] = await Promise.all([
+    statements.listTransactions.all(userId),
+    statements.listInvoices.all(userId)
+  ]);
   const now = new Date();
   const thisMonth = now.toISOString().slice(0, 7);
   const activeMonth = selectedMonth || thisMonth;
-  const invoiceAnchors = buildInvoiceMonthAnchors(transactions);
+  const invoiceCurrentRowIds = buildInvoiceCurrentRowIds(transactions);
+  const invoiceAnchors = buildInvoiceMonthAnchors(transactions, invoiceCurrentRowIds);
   const monthRows = {};
   const cardMonthRows = {};
   const categories = {};
   const cardTotals = {};
   let incomeMonth = 0;
   let expenseMonth = 0;
+  const invoicesWithOfficialTotal = new Set();
+
+  for (const invoice of invoices) {
+    const total = Number(invoice.total_amount || 0);
+    if (invoice.month !== activeMonth || total <= 0) continue;
+    const invoiceId = Number(invoice.id || 0);
+    invoicesWithOfficialTotal.add(invoiceId);
+    const cardKey = invoice.card_id || 'none';
+    cardTotals[cardKey] ||= { card_id: invoice.card_id || null, name: invoice.card_name || 'Sem cartao', amount: 0, count: 0 };
+    cardTotals[cardKey].amount += total;
+    cardTotals[cardKey].count += 1;
+  }
 
   for (const tx of transactions) {
     const month = tx.date.slice(0, 7);
     const amount = Number(tx.amount || 0);
-    const cardMonth = creditCardReferenceMonth(tx, invoiceAnchors);
+    const cardMonth = creditCardReferenceMonth(tx, invoiceAnchors, invoiceCurrentRowIds);
     monthRows[month] ||= { month, income: 0, expense: 0, forecast_card: 0 };
     monthRows[month][tx.type] += amount;
     if (tx.payment_method === 'credit_card' && tx.type === 'expense') {
@@ -800,14 +836,14 @@ async function dashboard(userId, selectedMonth = null) {
       else {
         expenseMonth += amount;
         categories[tx.category] = (categories[tx.category] || 0) + amount;
-        if (tx.payment_method === 'credit_card' && cardMonth === activeMonth) {
+        if (tx.payment_method === 'credit_card' && cardMonth === activeMonth && !invoicesWithOfficialTotal.has(Number(tx.invoice_id || 0))) {
           const cardKey = tx.card_id || 'none';
           cardTotals[cardKey] ||= { card_id: tx.card_id || null, name: tx.card_name || 'Sem cartao', amount: 0, count: 0 };
           cardTotals[cardKey].amount += amount;
           cardTotals[cardKey].count += 1;
         }
       }
-    } else if (tx.type === 'expense' && tx.payment_method === 'credit_card' && cardMonth === activeMonth) {
+    } else if (tx.type === 'expense' && tx.payment_method === 'credit_card' && cardMonth === activeMonth && !invoicesWithOfficialTotal.has(Number(tx.invoice_id || 0))) {
       const cardKey = tx.card_id || 'none';
       cardTotals[cardKey] ||= { card_id: tx.card_id || null, name: tx.card_name || 'Sem cartao', amount: 0, count: 0 };
       cardTotals[cardKey].amount += amount;
@@ -1020,6 +1056,11 @@ function isInvoiceStopLine(line) {
     || /^(encargos financeiros|limite disponivel|melhor dia de compra|resumo da fatura)/.test(text);
 }
 
+function isInvoiceFutureInstallmentSection(line) {
+  const text = normalizeInvoiceSearch(line);
+  return /^(compras parceladas|proximas faturas|proxima fatura|demais faturas|total para proximas faturas)\b/.test(text);
+}
+
 function extractInvoiceDatePrefix(line, fallbackMonth) {
   const numeric = line.match(/^(\d{1,2})\s*[\/.-]\s*(\d{1,2})(?:\s*[\/.-]\s*(\d{2,4}))?\s*(.*)$/i);
   const named = line.match(/^(\d{1,2})\s+([a-zA-Z\u00C0-\u00FF]{3,9})\.?(?:\s+(\d{2,4}))?\s*(.*)$/i);
@@ -1167,6 +1208,11 @@ function parseInvoiceText(text, fallbackMonth) {
     const totalMatch = line.match(totalRegex);
     if (totalMatch) total = parseMoneyBR(totalMatch[1]);
 
+    if (isInvoiceFutureInstallmentSection(line)) {
+      flushBlock();
+      break;
+    }
+
     if (isInvoiceStopLine(line)) {
       flushBlock();
       if (inTransactions && /^total/i.test(normalizeInvoiceSearch(line))) break;
@@ -1217,6 +1263,7 @@ function parseInvoiceTextLegacy(text, fallbackMonth) {
     }
     const totalMatch = line.match(totalRegex);
     if (totalMatch) total = parseMoneyBR(totalMatch[1]);
+    if (isInvoiceFutureInstallmentSection(line)) break;
     if (inTransactions && /^total da fatura/i.test(line)) break;
     if (ignoredSections.test(line) && !inTransactions) continue;
     const match = line.match(namedMonthLineRegex) || line.match(numericDateLineRegex);
