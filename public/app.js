@@ -147,9 +147,10 @@ function showApp() {
 async function boot() {
   applyTheme(localStorage.getItem(THEME_KEY) || 'light');
   $('txDate').value = today();
+  $('txReferenceMonth').value = currentMonth();
   $('investmentMovementDate').value = today();
   $('invoiceMonth').value = currentMonth();
-  updateTransactionInstallmentHint();
+  updateTransactionCreditCardFields();
   updateInvestmentAmountHint();
   if (!sessionStorage.getItem(APP_SESSION_KEY)) {
     await fetch('/api/auth/logout', { method: 'POST', cache: 'no-store', keepalive: true }).catch(() => {});
@@ -265,12 +266,49 @@ function updateTransactionInstallmentHint() {
   $('txAmount').title = installments > 1 ? 'Informe o valor de cada parcela mensal.' : '';
 }
 
-function expenseCategoryOptions(selected) {
+function categoryOptions(type, selected) {
   const names = state.categories
-    .filter(category => category.type === 'expense')
+    .filter(category => category.type === type)
     .map(category => category.name);
   if (selected && !names.includes(selected)) names.push(selected);
   return names.map(name => `<option value="${escapeAttr(name)}" ${name === selected ? 'selected' : ''}>${escapeHtml(name)}</option>`).join('');
+}
+
+function expenseCategoryOptions(selected) {
+  return categoryOptions('expense', selected);
+}
+
+function invoiceTypeOptions(selected = 'expense') {
+  return `
+    <option value="expense" ${selected !== 'income' ? 'selected' : ''}>Despesa</option>
+    <option value="income" ${selected === 'income' ? 'selected' : ''}>Estorno</option>
+  `;
+}
+
+function defaultCategory(type) {
+  return state.categories.find(category => category.type === type)?.name || (type === 'income' ? 'Outros' : 'Cartao de credito');
+}
+
+function createBlankInvoiceRow(type = 'expense') {
+  return {
+    type,
+    date: today(),
+    reference_month: state.invoiceDraft?.month || currentMonth(),
+    description: type === 'income' ? 'Estorno manual' : 'Lancamento manual',
+    category: defaultCategory(type),
+    amount: 0,
+    payment_method: 'credit_card',
+    installment_index: 1,
+    installment_total: 1,
+    installments: 1
+  };
+}
+
+function updateTransactionCreditCardFields() {
+  updateTransactionInstallmentHint();
+  const isCreditCard = $('txMethod')?.value === 'credit_card';
+  $('txReferenceMonth')?.classList.toggle('hidden', !isCreditCard);
+  if (isCreditCard && !$('txReferenceMonth').value) $('txReferenceMonth').value = ($('txDate').value || today()).slice(0, 7);
 }
 
 function renderCategoryManager() {
@@ -634,7 +672,7 @@ function renderAdmin() {
 
 function renderInvoiceDraftSummary() {
   const rows = state.invoiceDraft?.rows || [];
-  const total = rows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+  const total = rows.reduce((sum, row) => sum + (row.type === 'income' ? -1 : 1) * Number(row.amount || 0), 0);
   const invoiceTotal = Number(state.invoiceDraft?.total || 0);
   $('invoiceDraftSummary').classList.toggle('hidden', !state.invoiceDraft);
   $('invoiceDraftCount').textContent = rows.length;
@@ -666,6 +704,7 @@ function renderInvoiceDraft() {
     <div class="review-row invoice-review-row invoice-review-header">
       <span>Data</span>
       <span>Mes ref.</span>
+      <span>Tipo</span>
       <span>Descricao</span>
       <span>Categoria</span>
       <span>Valor</span>
@@ -678,8 +717,9 @@ function renderInvoiceDraft() {
     <div class="review-row invoice-review-row" data-row="${index}">
       <input type="date" value="${row.date}" data-invoice-field="date">
       <input type="month" value="${row.reference_month || state.invoiceDraft?.month || currentMonth()}" title="Mes de referencia da fatura" data-invoice-field="reference_month">
+      <select data-invoice-field="type">${invoiceTypeOptions(row.type)}</select>
       <input value="${escapeAttr(row.description)}" data-invoice-field="description">
-      <select data-invoice-field="category">${expenseCategoryOptions(row.category)}</select>
+      <select data-invoice-field="category">${categoryOptions(row.type === 'income' ? 'income' : 'expense', row.category)}</select>
       <input type="number" step="0.01" min="0" value="${row.amount}" data-invoice-field="amount">
       <input type="number" min="1" max="120" value="${row.installment_index || 1}" title="Parcela atual" data-invoice-field="installment_index">
       <input type="number" min="1" max="120" value="${row.installment_total || 1}" title="Total de parcelas" data-invoice-field="installment_total">
@@ -711,6 +751,7 @@ function readTxForm() {
     amount: Number($('txAmount').value),
     payment_method: $('txMethod').value,
     card_id: $('txCard').value || null,
+    reference_month: $('txMethod').value === 'credit_card' ? $('txReferenceMonth').value || $('txDate').value.slice(0, 7) : null,
     installments: Number($('txInstallments').value || 1),
     invoice_id: original?.invoice_id || null,
     installment_group: original?.installment_group || null,
@@ -735,8 +776,9 @@ function clearTxForm() {
   $('transactionId').value = '';
   $('transactionForm').reset();
   $('txDate').value = today();
+  $('txReferenceMonth').value = currentMonth();
   $('txInstallments').value = 1;
-  updateTransactionInstallmentHint();
+  updateTransactionCreditCardFields();
   $('transactionEditStatus').classList.add('hidden');
   $('saveTxBtn').textContent = 'Salvar lancamento';
   $('clearTxBtn').textContent = 'Limpar';
@@ -850,8 +892,9 @@ document.addEventListener('click', async (event) => {
     $('txAmount').value = tx.amount;
     $('txMethod').value = tx.payment_method;
     $('txCard').value = tx.card_id || '';
+    $('txReferenceMonth').value = tx.reference_month || tx.invoice_month || tx.date.slice(0, 7);
     $('txInstallments').value = tx.installment_total || 1;
-    updateTransactionInstallmentHint();
+    updateTransactionCreditCardFields();
     $('txNotes').value = tx.notes || '';
     setTransactionEditing(tx);
   }
@@ -1042,6 +1085,10 @@ $('cancelInvestmentMovementEditBtn').addEventListener('click', clearInvestmentMo
 $('txType').addEventListener('change', renderCategories);
 $('txInstallments').addEventListener('input', updateTransactionInstallmentHint);
 $('txInstallments').addEventListener('change', updateTransactionInstallmentHint);
+$('txMethod').addEventListener('change', updateTransactionCreditCardFields);
+$('txDate').addEventListener('change', () => {
+  if ($('txMethod').value === 'credit_card' && !$('txReferenceMonth').value) $('txReferenceMonth').value = $('txDate').value.slice(0, 7);
+});
 $('investmentMovementKind').addEventListener('change', updateInvestmentAmountHint);
 $('investmentQuantity').addEventListener('input', updateInvestmentAmountHint);
 $('investmentUnitPrice').addEventListener('input', updateInvestmentAmountHint);
@@ -1251,12 +1298,26 @@ function updateInvoiceDraftField(event) {
   if (!rowEl) return;
   const row = state.invoiceDraft.rows[Number(rowEl.dataset.row)];
   const numericFields = ['amount', 'installment_index', 'installment_total'];
-  row[event.target.dataset.invoiceField] = numericFields.includes(event.target.dataset.invoiceField) ? Number(event.target.value) : event.target.value;
+  const field = event.target.dataset.invoiceField;
+  row[field] = numericFields.includes(field) ? Number(event.target.value) : event.target.value;
+  if (field === 'type') {
+    row.category = defaultCategory(row.type === 'income' ? 'income' : 'expense');
+    renderInvoiceDraft();
+    return;
+  }
   renderInvoiceDraftSummary();
 }
 
 $('invoiceRows').addEventListener('input', updateInvoiceDraftField);
 $('invoiceRows').addEventListener('change', updateInvoiceDraftField);
+$('addInvoiceRowBtn').addEventListener('click', () => {
+  if (!state.invoiceDraft) {
+    toast('Leia ou releia uma fatura antes de adicionar item.');
+    return;
+  }
+  state.invoiceDraft.rows.push(createBlankInvoiceRow());
+  renderInvoiceDraft();
+});
 
 $('importInvoiceBtn').addEventListener('click', async () => {
   if (!state.invoiceDraft) return;

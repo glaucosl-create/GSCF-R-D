@@ -210,6 +210,7 @@
             <option value="credit_card">Cartao de credito</option>
           </select>
           <select id="txCard"></select>
+          <input id="txReferenceMonth" type="month" title="Mes de referencia da fatura do cartao">
           <input id="txInstallments" type="number" min="1" max="120" value="1" title="Parcelas">
           <input id="txNotes" placeholder="Observacoes">
           <button type="submit" id="saveTxBtn">Salvar lancamento</button>
@@ -325,7 +326,10 @@
         <section id="invoiceReview" class="hidden">
           <div class="section-head">
             <h3>Itens detectados</h3>
-            <button id="importInvoiceBtn">Importar lancamentos</button>
+            <div class="actions">
+              <button id="addInvoiceRowBtn" type="button" class="secondary">Adicionar item</button>
+              <button id="importInvoiceBtn">Importar lancamentos</button>
+            </div>
           </div>
           <div id="invoiceDraftSummary" class="invoice-draft-summary hidden" aria-live="polite">
             <span><strong id="invoiceDraftCount">0</strong> itens detectados</span>

@@ -849,29 +849,25 @@ async function dashboard(userId, selectedMonth = null) {
   for (const tx of transactions) {
     const month = tx.date.slice(0, 7);
     const amount = Number(tx.amount || 0);
+    const cardAmount = tx.type === 'income' ? -amount : amount;
     const cardMonth = creditCardReferenceMonth(tx, invoiceAnchors, invoiceCurrentRowIds);
     monthRows[month] ||= { month, income: 0, expense: 0, forecast_card: 0 };
     monthRows[month][tx.type] += amount;
-    if (tx.payment_method === 'credit_card' && tx.type === 'expense') {
+    if (tx.payment_method === 'credit_card') {
       cardMonthRows[cardMonth] ||= { month: cardMonth, income: 0, expense: 0, forecast_card: 0 };
-      cardMonthRows[cardMonth].forecast_card += amount;
+      cardMonthRows[cardMonth].forecast_card += cardAmount;
     }
     if (month === activeMonth) {
       if (tx.type === 'income') incomeMonth += amount;
       else {
         expenseMonth += amount;
         categories[tx.category] = (categories[tx.category] || 0) + amount;
-        if (tx.payment_method === 'credit_card' && cardMonth === activeMonth && !invoicesWithOfficialTotal.has(Number(tx.invoice_id || 0))) {
-          const cardKey = tx.card_id || 'none';
-          cardTotals[cardKey] ||= { card_id: tx.card_id || null, name: tx.card_name || 'Sem cartao', amount: 0, count: 0 };
-          cardTotals[cardKey].amount += amount;
-          cardTotals[cardKey].count += 1;
-        }
       }
-    } else if (tx.type === 'expense' && tx.payment_method === 'credit_card' && cardMonth === activeMonth && !invoicesWithOfficialTotal.has(Number(tx.invoice_id || 0))) {
+    }
+    if (tx.payment_method === 'credit_card' && cardMonth === activeMonth && !invoicesWithOfficialTotal.has(Number(tx.invoice_id || 0))) {
       const cardKey = tx.card_id || 'none';
       cardTotals[cardKey] ||= { card_id: tx.card_id || null, name: tx.card_name || 'Sem cartao', amount: 0, count: 0 };
-      cardTotals[cardKey].amount += amount;
+      cardTotals[cardKey].amount += cardAmount;
       cardTotals[cardKey].count += 1;
     }
   }
