@@ -806,12 +806,17 @@ async function dashboard(userId, selectedMonth = null) {
   const cardMonthRows = {};
   const categories = {};
   const cardTotals = {};
+  const invoiceMonthRows = {};
   let incomeMonth = 0;
   let expenseMonth = 0;
   const invoicesWithOfficialTotal = new Set();
 
   for (const invoice of invoices) {
     const total = Number(invoice.total_amount || 0);
+    if (invoice.month) {
+      invoiceMonthRows[invoice.month] ||= { month: invoice.month, income: 0, expense: 0, forecast_card: 0 };
+      invoiceMonthRows[invoice.month].forecast_card += total;
+    }
     if (invoice.month !== activeMonth || total <= 0) continue;
     const invoiceId = Number(invoice.id || 0);
     invoicesWithOfficialTotal.add(invoiceId);
@@ -851,11 +856,25 @@ async function dashboard(userId, selectedMonth = null) {
     }
   }
 
-  const knownMonths = Array.from(new Set([...Object.keys(monthRows), ...Object.keys(cardMonthRows)]));
-  const lastMonth = knownMonths.length ? knownMonths.reduce((max, month) => month > max ? month : max, activeMonth) : activeMonth;
-  const startMonth = activeMonth < thisMonth ? activeMonth : thisMonth;
-  const endMonth = lastMonth > activeMonth ? lastMonth : activeMonth;
-  const months = buildMonthRange(startMonth, endMonth, monthRows);
+  const knownMonths = Array.from(new Set([
+    thisMonth,
+    activeMonth,
+    ...Object.keys(monthRows),
+    ...Object.keys(cardMonthRows),
+    ...Object.keys(invoiceMonthRows)
+  ].filter(Boolean)));
+  const startMonth = knownMonths.reduce((min, month) => month < min ? month : min, activeMonth);
+  const endMonth = knownMonths.reduce((max, month) => month > max ? month : max, activeMonth);
+  const monthRangeRows = {};
+  for (const month of knownMonths) {
+    monthRangeRows[month] = {
+      month,
+      income: Number(monthRows[month]?.income || 0),
+      expense: Number(monthRows[month]?.expense || 0),
+      forecast_card: Number(cardMonthRows[month]?.forecast_card || invoiceMonthRows[month]?.forecast_card || monthRows[month]?.forecast_card || 0)
+    };
+  }
+  const months = buildMonthRange(startMonth, endMonth, monthRangeRows);
   const activityMonths = months.filter(row =>
     Number(row.income || 0) !== 0
     || Number(row.expense || 0) !== 0
