@@ -834,11 +834,38 @@ function csvCell(value) {
   return `"${String(value ?? '').replace(/"/g, '""')}"`;
 }
 
+function selectedOptionText(id) {
+  const element = $(id);
+  return element?.selectedOptions?.[0]?.textContent || '';
+}
+
+function reportFilterSummary() {
+  return [
+    ['Base do periodo', selectedOptionText('reportDateBasis')],
+    ['Periodo', `${formatMonth($('reportStartMonth').value)} ate ${formatMonth($('reportEndMonth').value)}`],
+    ['Tipo', selectedOptionText('reportTypeFilter')],
+    ['Categoria', selectedOptionText('reportCategoryFilter')],
+    ['Meio', selectedOptionText('reportMethodFilter')],
+    ['Cartao', selectedOptionText('reportCardFilter')],
+    ['Origem', selectedOptionText('reportSourceFilter')],
+    ['Agrupamento', selectedOptionText('reportGroupBy')],
+    ['Busca', $('reportSearch').value.trim() || 'Sem busca']
+  ];
+}
+
+function signedReportAmount(tx) {
+  return tx.type === 'income' ? Number(tx.amount || 0) : -Number(tx.amount || 0);
+}
+
 function exportReportCsv() {
   const { rows, groups, totals } = buildReportData();
   const lines = [
+    ['CF-R&D Controle Financeiro Pessoal'].map(csvCell).join(';'),
     ['Relatorio financeiro'].map(csvCell).join(';'),
-    ['Periodo', $('reportStartMonth').value, $('reportEndMonth').value].map(csvCell).join(';'),
+    ['Gerado em', new Date().toLocaleString('pt-BR')].map(csvCell).join(';'),
+    [],
+    ['Filtros'].map(csvCell).join(';'),
+    ...reportFilterSummary().map(row => row.map(csvCell).join(';')),
     [],
     ['Subtotais'].map(csvCell).join(';'),
     ['Grupo', 'Lancamentos', 'Receitas', 'Despesas', 'Saldo'].map(csvCell).join(';'),
@@ -853,7 +880,7 @@ function exportReportCsv() {
       labelType(tx.type),
       tx.description,
       tx.category,
-      (tx.type === 'income' ? Number(tx.amount || 0) : -Number(tx.amount || 0)).toFixed(2),
+      signedReportAmount(tx).toFixed(2),
       labelMethod(tx.payment_method),
       reportCardName(tx),
       isPlannedInstallment(tx) ? `${tx.installment_index || 1}/${tx.installment_total || 1}` : '',
@@ -868,6 +895,196 @@ function exportReportCsv() {
   link.click();
   URL.revokeObjectURL(link.href);
   link.remove();
+}
+
+function printReportPdf() {
+  const { rows, groups, totals } = buildReportData();
+  const generatedAt = new Date().toLocaleString('pt-BR');
+  const logoUrl = `${window.location.origin}/assets/cfdr-logo.jpeg`;
+  const filterRows = reportFilterSummary().map(([label, value]) => `
+    <tr><th>${escapeHtml(label)}</th><td>${escapeHtml(value)}</td></tr>
+  `).join('');
+  const groupRows = groups.length ? groups.map(group => `
+    <tr>
+      <td><strong>${escapeHtml(group.label)}</strong></td>
+      <td>${group.count}</td>
+      <td>${money(group.income)}</td>
+      <td>${money(group.expense)}</td>
+      <td class="${group.balance < 0 ? 'negative' : 'positive'}">${money(group.balance)}</td>
+    </tr>
+  `).join('') : '<tr><td colspan="5">Sem subtotais para os filtros selecionados.</td></tr>';
+  const detailRows = rows.length ? rows.map(tx => `
+    <tr>
+      <td>${escapeHtml(formatDate(tx.date))}</td>
+      <td>${escapeHtml(formatMonth(reportReferenceMonth(tx)))}</td>
+      <td>${escapeHtml(labelType(tx.type))}</td>
+      <td>${escapeHtml(tx.description)}</td>
+      <td>${escapeHtml(tx.category)}</td>
+      <td class="num ${signedReportAmount(tx) < 0 ? 'negative' : 'positive'}">${money(signedReportAmount(tx))}</td>
+      <td>${escapeHtml(labelMethod(tx.payment_method))}</td>
+      <td>${escapeHtml(reportCardName(tx))}</td>
+      <td>${isPlannedInstallment(tx) ? `${tx.installment_index || 1}/${tx.installment_total || 1}` : '-'}</td>
+    </tr>
+  `).join('') : '<tr><td colspan="9">Nenhum lancamento encontrado.</td></tr>';
+  const html = `<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <title>Relatorio financeiro</title>
+  <style>
+    @page { size: A4 landscape; margin: 12mm; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: #17202e;
+      background: #fff;
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 11px;
+      line-height: 1.35;
+    }
+    .print-page { width: 100%; }
+    .header {
+      display: grid;
+      grid-template-columns: 112px 1fr auto;
+      gap: 18px;
+      align-items: center;
+      border-bottom: 2px solid #17202e;
+      padding-bottom: 12px;
+      margin-bottom: 14px;
+    }
+    .logo {
+      width: 112px;
+      height: 72px;
+      object-fit: contain;
+    }
+    h1 {
+      margin: 0;
+      font-size: 22px;
+      letter-spacing: 0;
+    }
+    h2 {
+      margin: 18px 0 8px;
+      font-size: 15px;
+      border-bottom: 1px solid #cbd5e1;
+      padding-bottom: 5px;
+    }
+    .muted { color: #64748b; margin-top: 4px; }
+    .generated { text-align: right; color: #475569; white-space: nowrap; }
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      margin: 12px 0;
+    }
+    .summary article {
+      border: 1px solid #cbd5e1;
+      padding: 9px 10px;
+      min-height: 58px;
+    }
+    .summary span {
+      display: block;
+      color: #64748b;
+      font-weight: 700;
+      text-transform: uppercase;
+      font-size: 9px;
+    }
+    .summary strong {
+      display: block;
+      margin-top: 6px;
+      font-size: 16px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      page-break-inside: auto;
+    }
+    tr { page-break-inside: avoid; page-break-after: auto; }
+    th, td {
+      border: 1px solid #cbd5e1;
+      padding: 5px 6px;
+      vertical-align: top;
+    }
+    th {
+      background: #f1f5f9;
+      color: #334155;
+      text-transform: uppercase;
+      font-size: 9px;
+      text-align: left;
+    }
+    tfoot th {
+      background: #e2e8f0;
+      color: #17202e;
+    }
+    .filters {
+      max-width: 100%;
+      margin-bottom: 4px;
+    }
+    .filters th {
+      width: 170px;
+    }
+    .num,
+    .summary-table td:nth-child(n+2),
+    .summary-table th:nth-child(n+2) {
+      text-align: right;
+      white-space: nowrap;
+    }
+    .positive { color: #0e8f67; font-weight: 700; }
+    .negative { color: #b42318; font-weight: 700; }
+    .detail-table td:nth-child(4) {
+      min-width: 210px;
+    }
+    @media print {
+      body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .no-print { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <main class="print-page">
+    <header class="header">
+      <img class="logo" src="${logoUrl}" alt="CF-R&amp;D">
+      <div>
+        <h1>Relatorio financeiro</h1>
+        <p class="muted">CF-R&amp;D Controle Financeiro Pessoal</p>
+      </div>
+      <div class="generated">
+        <strong>Gerado em</strong><br>${escapeHtml(generatedAt)}
+      </div>
+    </header>
+    <section class="summary">
+      <article><span>Receitas</span><strong>${money(totals.income)}</strong></article>
+      <article><span>Despesas</span><strong>${money(totals.expense)}</strong></article>
+      <article><span>Saldo</span><strong class="${totals.balance < 0 ? 'negative' : 'positive'}">${money(totals.balance)}</strong></article>
+      <article><span>Lancamentos</span><strong>${totals.count}</strong></article>
+    </section>
+    <h2>Filtros aplicados</h2>
+    <table class="filters"><tbody>${filterRows}</tbody></table>
+    <h2>Subtotais</h2>
+    <table class="summary-table">
+      <thead><tr><th>Grupo</th><th>Lancamentos</th><th>Receitas</th><th>Despesas</th><th>Saldo</th></tr></thead>
+      <tbody>${groupRows}</tbody>
+      <tfoot><tr><th>Total geral</th><th>${totals.count}</th><th>${money(totals.income)}</th><th>${money(totals.expense)}</th><th class="${totals.balance < 0 ? 'negative' : 'positive'}">${money(totals.balance)}</th></tr></tfoot>
+    </table>
+    <h2>Detalhamento</h2>
+    <table class="detail-table">
+      <thead><tr><th>Data</th><th>Mes ref.</th><th>Tipo</th><th>Descricao</th><th>Categoria</th><th>Valor</th><th>Meio</th><th>Cartao</th><th>Parcela</th></tr></thead>
+      <tbody>${detailRows}</tbody>
+    </table>
+  </main>
+</body>
+</html>`;
+  const printWindow = window.open('', '_blank', 'width=1120,height=820');
+  if (!printWindow) {
+    toast('Permita pop-ups para imprimir ou salvar o relatorio em PDF.');
+    return;
+  }
+  printWindow.document.open();
+  printWindow.document.write(html);
+  printWindow.document.close();
+  setTimeout(() => {
+    printWindow.focus();
+    printWindow.print();
+  }, 500);
 }
 
 function resetReportFilters() {
@@ -1428,6 +1645,7 @@ REPORT_FILTER_IDS.forEach(id => {
   element.addEventListener(id === 'reportSearch' ? 'input' : 'change', renderReports);
 });
 $('resetReportBtn').addEventListener('click', resetReportFilters);
+$('printReportPdfBtn').addEventListener('click', printReportPdf);
 $('exportReportCsvBtn').addEventListener('click', exportReportCsv);
 
 $('transactionForm').addEventListener('submit', async (event) => {
