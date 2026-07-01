@@ -742,12 +742,44 @@ async function investmentsDashboard(userId) {
   return { assets, movements, ...buildInvestmentSummary(assets, movements) };
 }
 
+function buildInvoiceMonthAnchors(transactions) {
+  const anchors = {};
+  for (const tx of transactions) {
+    if (tx.type !== 'expense' || tx.payment_method !== 'credit_card' || !tx.installment_group || !tx.invoice_month) continue;
+    anchors[tx.installment_group] ||= [];
+    anchors[tx.installment_group].push({
+      index: Math.max(1, Number(tx.installment_index || 1)),
+      month: tx.invoice_month
+    });
+  }
+  for (const group of Object.keys(anchors)) {
+    anchors[group].sort((a, b) => a.index - b.index);
+  }
+  return anchors;
+}
+
+function creditCardReferenceMonth(tx, invoiceAnchors) {
+  if (tx.type !== 'expense' || tx.payment_method !== 'credit_card') return tx.date.slice(0, 7);
+  if (tx.invoice_month) return tx.invoice_month;
+  const index = Math.max(1, Number(tx.installment_index || 1));
+  const anchors = tx.installment_group ? invoiceAnchors[tx.installment_group] || [] : [];
+  if (!anchors.length) return tx.date.slice(0, 7);
+  let anchor = anchors[0];
+  for (const item of anchors) {
+    if (item.index <= index) anchor = item;
+    else break;
+  }
+  return addMonthsToMonth(anchor.month, index - anchor.index);
+}
+
 async function dashboard(userId, selectedMonth = null) {
   const transactions = await statements.listTransactions.all(userId);
   const now = new Date();
   const thisMonth = now.toISOString().slice(0, 7);
   const activeMonth = selectedMonth || thisMonth;
+  const invoiceAnchors = buildInvoiceMonthAnchors(transactions);
   const monthRows = {};
+  const cardMonthRows = {};
   const categories = {};
   const cardTotals = {};
   let incomeMonth = 0;
@@ -755,25 +787,35 @@ async function dashboard(userId, selectedMonth = null) {
 
   for (const tx of transactions) {
     const month = tx.date.slice(0, 7);
+    const amount = Number(tx.amount || 0);
+    const cardMonth = creditCardReferenceMonth(tx, invoiceAnchors);
     monthRows[month] ||= { month, income: 0, expense: 0, forecast_card: 0 };
-    monthRows[month][tx.type] += tx.amount;
-    if (tx.payment_method === 'credit_card' && tx.type === 'expense') monthRows[month].forecast_card += tx.amount;
+    monthRows[month][tx.type] += amount;
+    if (tx.payment_method === 'credit_card' && tx.type === 'expense') {
+      cardMonthRows[cardMonth] ||= { month: cardMonth, income: 0, expense: 0, forecast_card: 0 };
+      cardMonthRows[cardMonth].forecast_card += amount;
+    }
     if (month === activeMonth) {
-      if (tx.type === 'income') incomeMonth += tx.amount;
+      if (tx.type === 'income') incomeMonth += amount;
       else {
-        expenseMonth += tx.amount;
-        categories[tx.category] = (categories[tx.category] || 0) + tx.amount;
-        if (tx.payment_method === 'credit_card') {
+        expenseMonth += amount;
+        categories[tx.category] = (categories[tx.category] || 0) + amount;
+        if (tx.payment_method === 'credit_card' && cardMonth === activeMonth) {
           const cardKey = tx.card_id || 'none';
           cardTotals[cardKey] ||= { card_id: tx.card_id || null, name: tx.card_name || 'Sem cartao', amount: 0, count: 0 };
-          cardTotals[cardKey].amount += Number(tx.amount || 0);
+          cardTotals[cardKey].amount += amount;
           cardTotals[cardKey].count += 1;
         }
       }
+    } else if (tx.type === 'expense' && tx.payment_method === 'credit_card' && cardMonth === activeMonth) {
+      const cardKey = tx.card_id || 'none';
+      cardTotals[cardKey] ||= { card_id: tx.card_id || null, name: tx.card_name || 'Sem cartao', amount: 0, count: 0 };
+      cardTotals[cardKey].amount += amount;
+      cardTotals[cardKey].count += 1;
     }
   }
 
-  const knownMonths = Object.keys(monthRows);
+  const knownMonths = Array.from(new Set([...Object.keys(monthRows), ...Object.keys(cardMonthRows)]));
   const lastMonth = knownMonths.length ? knownMonths.reduce((max, month) => month > max ? month : max, activeMonth) : activeMonth;
   const startMonth = activeMonth < thisMonth ? activeMonth : thisMonth;
   const endMonth = lastMonth > activeMonth ? lastMonth : activeMonth;
@@ -781,9 +823,8 @@ async function dashboard(userId, selectedMonth = null) {
   const activityMonths = months.filter(row =>
     Number(row.income || 0) !== 0
     || Number(row.expense || 0) !== 0
-    || Number(row.forecast_card || 0) !== 0
   );
-  const forecast = Object.values(monthRows)
+  const forecast = Object.values(cardMonthRows)
     .filter(row => row.month >= thisMonth && row.forecast_card > 0)
     .sort((a, b) => a.month.localeCompare(b.month))
     .slice(0, 18);

@@ -483,7 +483,17 @@ export async function initDatabase({ dataDir }) {
         provider_response = excluded.provider_response,
         created_at = CURRENT_TIMESTAMP
     `),
-    listTransactions: prepare('SELECT t.*, c.name AS card_name FROM transactions t LEFT JOIN cards c ON c.id=t.card_id AND c.user_id=t.user_id WHERE t.user_id=? ORDER BY t.date DESC, t.id DESC'),
+    listTransactions: prepare(`
+      SELECT
+        t.*,
+        c.name AS card_name,
+        i.month AS invoice_month
+      FROM transactions t
+      LEFT JOIN cards c ON c.id=t.card_id AND c.user_id=t.user_id
+      LEFT JOIN invoices i ON i.id=t.invoice_id AND i.user_id=t.user_id
+      WHERE t.user_id=?
+      ORDER BY t.date DESC, t.id DESC
+    `),
     getTransaction: prepare('SELECT * FROM transactions WHERE id = ? AND user_id = ?'),
     insertTransaction: prepare({
       sqlite: `INSERT INTO transactions
